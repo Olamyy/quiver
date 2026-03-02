@@ -1,0 +1,42 @@
+version: 2
+updates:
+  # Rust dependencies
+  - package-ecosystem: "cargo"
+    directory: "/quiver-core"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      arrow-ecosystem:
+        patterns:
+          - "arrow*"
+      tonic-ecosystem:
+        patterns:
+          - "tonic*"
+          - "prost*"
+    labels:
+      - "dependencies"
+      - "rust"
+
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/quiver-python"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+

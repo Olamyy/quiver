@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package quiver.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message EntityKey {
+  string entity_type = 1;
+  string entity_id = 2;
+}
+
+message FreshnessPolicy {
+  int64 max_staleness_seconds = 1;
+  bool allow_async_refresh = 2;
+  bool error_on_stale = 3;
+  bool require_all_features = 4;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string caller = 2;
+  string environment = 3;
+}

@@ -1,0 +1,44 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'quiver-core/Cargo.lock'
+      - 'quiver-core/Cargo.toml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'quiver-core/Cargo.lock'
+      - 'quiver-core/Cargo.toml'
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  security_audit:
+    name: Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: ./quiver-core
+        run: cargo audit
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+

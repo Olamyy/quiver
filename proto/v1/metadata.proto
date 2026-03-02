@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package quiver.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message ServedFeatureMetadata {
+  map<string, google.protobuf.Timestamp> feature_timestamps = 1;
+  bool served_from_cache = 2;
+  bool is_stale = 3;
+  map<string, string> backend_sources = 4;
+  map<string, BatchStats> feature_stats = 5;
+}
+
+message BatchStats {
+  double null_rate = 1;
+  double mean = 2;
+  double std_dev = 3;
+}
+
+message FeatureViewMetadata {
+  string name = 1;
+  string entity_type = 2;
+  string entity_key = 3;
+  repeated FeatureColumnSchema columns = 4;
+  map<string, string> backend_routing = 5;
+  int64 schema_version = 6;
+}
+
+message FeatureColumnSchema {
+  string name = 1;
+  string arrow_type = 2;
+  bool nullable = 3;
+}

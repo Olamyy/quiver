@@ -1,0 +1,44 @@
+name: Protobuf Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'proto/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'proto/**'
+
+jobs:
+  validate:
+    name: Validate Protobuf Files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: Lint protobuf files
+        run: |
+          cd proto
+          buf lint
+        continue-on-error: true
+
+      - name: Check breaking changes
+        if: github.event_name == 'pull_request'
+        run: |
+          cd proto
+          buf breaking --against '.git#branch=main'
+        continue-on-error: true
+
+      - name: Validate proto compilation (Rust)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test proto build
+        working-directory: ./quiver-core
+        run: cargo build --features proto-only || cargo build
+

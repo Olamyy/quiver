@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package quiver.v1;
+
+import "google/protobuf/timestamp.proto";
+import "types.proto";
+
+message FeatureRequest {
+  string feature_view = 1;
+  repeated string feature_names = 2;
+  repeated EntityKey entities = 3;
+  google.protobuf.Timestamp as_of = 4;
+  FreshnessPolicy freshness = 5;
+  RequestContext context = 6;
+  OutputOptions output = 7;
+}
+
+message OutputOptions {
+  bool include_timestamps = 1;
+  bool include_freshness = 2;
+  string null_strategy = 3;
+}
