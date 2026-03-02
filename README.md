@@ -1,14 +1,15 @@
 # Quiver
 
-Quiver is an __experimental__ in-flight grpc server for serving features across different backends.
-
-> Quiver holds Arrow-formatted feature data and serves it to model servers on demand. Think of it as **Triton for feature serving**.
+Quiver is an __experimental__ in-flight grpc server for serving features across different backends. 
+It holds Arrow-formatted feature data and serves it to model servers on demand. Think of it as **Triton for feature serving**.
 
 ---
 
 ## Why?
 
-Feature stores are really good at registering, versioning and computing features. However, an area that has not received as much attention is the path from computed feature to model input. Today, the serving path for a lot of inference workloads looks something like this:
+Feature stores are good at registering, versioning and computing features. 
+An area that has not received as much attention is the path from computed feature to model input.
+Today, the serving path for a lot of inference workloads looks something like this:
 
 ```mermaid
 graph TD
@@ -57,7 +58,7 @@ Quiver aims to optimize the inference path from computation to model input by:
 
 ---
 
-## The Vision: Triton for Features
+## The Vision
 
 While NVIDIA Triton optimizes the compute-bound execution of models on GPUs, Quiver optimizes the I/O-bound orchestration of the data that feeds them.
 
@@ -75,7 +76,7 @@ graph TB
         TP[Training Pipeline]
     end
 
-    subgraph Quiver Server (Rust)
+    subgraph "Quiver Server"
         FE[Flight Endpoint]
         FR[Feature Resolver]
         SWR[SWR Cache]
@@ -153,6 +154,7 @@ grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
 
 Quiver provides a Python client that wraps `pyarrow.flight` to handle Protobuf serialization and tensor conversion.
 
+```python
 from quiver import QuiverClient
 
 client = QuiverClient("grpc://localhost:8815")
@@ -166,9 +168,9 @@ features = client.get_features(
 
 # Zero-copy handover to PyTorch
 X = features.to_tensor() 
+model = ...
 model.predict(X)
-
-
+```
 
 ## Roadmap
 
