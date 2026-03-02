@@ -143,16 +143,6 @@ impl BackendAdapter for MemoryAdapter {
         feature_names: &[String],
         as_of: Option<DateTime<Utc>>,
     ) -> Result<RecordBatch, AdapterError> {
-        if entity_ids.is_empty() {
-            return Err(AdapterError::invalid(BACKEND_NAME, "entity_ids is empty"));
-        }
-        if feature_names.is_empty() {
-            return Err(AdapterError::invalid(
-                BACKEND_NAME,
-                "feature_names is empty",
-            ));
-        }
-
         let cutoff = as_of.unwrap_or_else(Utc::now);
         let rows = self.rows.read().unwrap();
 
@@ -172,7 +162,7 @@ impl BackendAdapter for MemoryAdapter {
             .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))
     }
 
-    async fn put(&self, batch: RecordBatch, _feature_view: &str) -> Result<(), AdapterError> {
+    async fn put(&self, batch: RecordBatch) -> Result<(), AdapterError> {
         let entity_col = batch
             .column_by_name("entity_id")
             .and_then(|c| c.as_any().downcast_ref::<StringArray>())

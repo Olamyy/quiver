@@ -20,18 +20,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "0.0.0.0:8815".parse()?;
 
     let registry = Arc::new(StaticRegistry::new());
+    registry.register(crate::proto::quiver::v1::FeatureViewMetadata {
+        name: "user_features".to_string(),
+        entity_type: "user".to_string(),
+        entity_key: "entity_id".to_string(),
+        columns: vec![
+            crate::proto::quiver::v1::FeatureColumnSchema {
+                name: "spend_30d".to_string(),
+                arrow_type: "float64".to_string(),
+                nullable: true,
+            },
+            crate::proto::quiver::v1::FeatureColumnSchema {
+                name: "session_count".to_string(),
+                arrow_type: "int64".to_string(),
+                nullable: true,
+            },
+        ],
+        backend_routing: [
+            ("spend_30d".to_string(), "memory".to_string()),
+            ("session_count".to_string(), "memory".to_string()),
+        ]
+        .into(),
+        schema_version: 1,
+    });
 
-    let memory_adapter = Arc::new(MemoryAdapter::new());
+    let adapter = Arc::new(MemoryAdapter::seed([
+        (
+            "user:101",
+            vec![
+                (
+                    "spend_30d",
+                    crate::adapters::memory::ScalarValue::Float64(890.0),
+                ),
+                (
+                    "session_count",
+                    crate::adapters::memory::ScalarValue::Int64(23),
+                ),
+            ],
+            chrono::Utc::now(),
+        ),
+        (
+            "user:102",
+            vec![
+                (
+                    "spend_30d",
+                    crate::adapters::memory::ScalarValue::Float64(120.0),
+                ),
+                (
+                    "session_count",
+                    crate::adapters::memory::ScalarValue::Int64(4),
+                ),
+            ],
+            chrono::Utc::now(),
+        ),
+    ]));
 
-    let resolver = Arc::new(Resolver::new(registry.clone()));
-    resolver.register_adapter("memory".to_string(), memory_adapter.clone());
-
-    demo::seed_demo_data(registry.clone(), memory_adapter.clone()).await?;
+    let resolver = Arc::new(Resolver::new(registry));
+    resolver.register_adapter("memory".to_string(), adapter);
 
     let server = QuiverFlightServer::new(resolver);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
-    health_reporter.set_serving::<QuiverFlightServer>().await;
+    health_reporter
+        .set_serving::<FlightServiceServer<QuiverFlightServer>>()
+        .await;
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(tonic::include_file_descriptor_set!(

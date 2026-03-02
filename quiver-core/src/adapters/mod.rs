@@ -15,7 +15,7 @@ pub trait BackendAdapter: Send + Sync {
         as_of: Option<DateTime<Utc>>,
     ) -> Result<RecordBatch, AdapterError>;
 
-    async fn put(&self, batch: RecordBatch, feature_view: &str) -> Result<(), AdapterError>;
+    async fn put(&self, batch: RecordBatch) -> Result<(), AdapterError>;
 
     async fn health(&self) -> HealthStatus;
 }

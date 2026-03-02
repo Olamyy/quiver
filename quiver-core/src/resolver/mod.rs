@@ -36,9 +36,20 @@ impl Resolver {
             .await
             .map_err(|e| ResolverError::Registry(e.to_string()))?;
 
-        let backend_name = metadata.backend_routing.values().next().ok_or_else(|| {
-            ResolverError::Internal("No backend routing defined for feature view".to_string())
-        })?;
+        let backend_name = feature_names
+            .iter()
+            .map(|fname| {
+                metadata.backend_routing.get(fname).ok_or_else(|| {
+                    ResolverError::Internal(format!(
+                        "No backend routing for feature '{}' in view '{}'",
+                        fname, feature_view_name
+                    ))
+                })
+            })
+            .collect::<Result<std::collections::HashSet<_>, _>>()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ResolverError::Internal("Empty feature list".to_string()))?;
 
         let adapter = self
             .adapters
@@ -83,13 +94,25 @@ impl Resolver {
                         arrow::datatypes::TimeUnit::Nanosecond,
                         Some("UTC".into()),
                     ),
-                    _ => arrow::datatypes::DataType::Utf8,
+                    other => {
+                        return Err(ResolverError::Internal(format!(
+                            "Unknown arrow_type '{}' for column '{}'",
+                            other, col.name
+                        )));
+                    }
                 };
-                arrow::datatypes::Field::new(&col.name, dt, col.nullable)
+                Ok(arrow::datatypes::Field::new(&col.name, dt, col.nullable))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(arrow::datatypes::Schema::new(fields))
+    }
+
+    pub async fn list_views(&self) -> Result<Vec<String>, ResolverError> {
+        self.registry
+            .list_views()
+            .await
+            .map_err(|e| ResolverError::Registry(e.to_string()))
     }
 }
 
