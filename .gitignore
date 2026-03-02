@@ -211,4 +211,4 @@ __marimo__/
 *.html
 .vscode/*
 test_env/*
-quiver-rfc-v2.md
+*-rfc*.md
