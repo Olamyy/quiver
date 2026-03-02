@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-arrow = "54"
-arrow-flight = "54"
+arrow = "58"
+arrow-flight = "58"
 tonic = "0.14"
 prost = "0.14"
 prost-types = "0.14"
