@@ -2,9 +2,9 @@ name: Integration Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 jobs:
   integration-test:
@@ -16,10 +16,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -53,10 +58,10 @@ jobs:
         run: |
           # Check health
           grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
-          
+
           # List services
           grpcurl -plaintext localhost:8815 list
-          
+
           # Get schema
           grpcurl -plaintext -d '{"path": ["my_feature_view"]}' \
             localhost:8815 arrow.flight.protocol.FlightService/GetSchema
@@ -76,4 +81,3 @@ jobs:
           if [ -f /tmp/quiver.pid ]; then
             kill $(cat /tmp/quiver.pid) || true
           fi
-

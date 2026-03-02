@@ -2,17 +2,17 @@ name: Rust CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
     paths:
-      - 'quiver-core/**'
-      - 'proto/**'
-      - '.github/workflows/rust-ci.yml'
+      - "quiver-core/**"
+      - "proto/**"
+      - ".github/workflows/rust-ci.yml"
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
     paths:
-      - 'quiver-core/**'
-      - 'proto/**'
-      - '.github/workflows/rust-ci.yml'
+      - "quiver-core/**"
+      - "proto/**"
+      - ".github/workflows/rust-ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,6 +27,11 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -71,6 +76,11 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Cache cargo registry
         uses: actions/cache@v5
         with:
@@ -104,6 +114,11 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check formatting
         working-directory: ./quiver-core
         run: cargo fmt --all -- --check
@@ -118,6 +133,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -150,6 +170,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
 
@@ -160,6 +185,5 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          file: ./cobertura.xml
+          files: ./cobertura.xml
           fail_ci_if_error: false
-

@@ -117,6 +117,7 @@ Quiver is in early development. The core Arrow flight server is complete. The se
 
 ### Prerequisites
 - [Rust](https://www.rust-lang.org/tools/install)
+- [Protobuf Compiler](https://grpc.io/docs/protoc-installation/) (`brew install protobuf` on Mac)
 - [grpcurl](https://github.com/fullstorydev/grpcurl) (for manual testing)
 
 ### Run the Server
