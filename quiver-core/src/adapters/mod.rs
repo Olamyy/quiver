@@ -1,7 +1,7 @@
+pub mod memory;
+
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-
-pub mod memory;
 
 #[async_trait::async_trait]
 pub trait BackendAdapter: Send + Sync {
@@ -10,7 +10,6 @@ pub trait BackendAdapter: Send + Sync {
 
     async fn get(
         &self,
-        feature_view: &str,
         entity_ids: &[String],
         feature_names: &[String],
         as_of: Option<DateTime<Utc>>,
@@ -71,6 +70,20 @@ impl AdapterError {
         Self::Internal {
             backend: backend.to_string(),
             message: msg.into(),
+        }
+    }
+
+    pub fn invalid(backend: &str, msg: impl Into<String>) -> Self {
+        Self::InvalidRequest {
+            backend: backend.to_string(),
+            message: msg.into(),
+        }
+    }
+
+    pub fn arrow(backend: &str, msg: impl Into<String>) -> Self {
+        Self::Internal {
+            backend: backend.to_string(),
+            message: format!("Arrow error: {}", msg.into()),
         }
     }
 

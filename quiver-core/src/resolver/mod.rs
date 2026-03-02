@@ -47,7 +47,7 @@ impl Resolver {
 
         let batch = adapter
             .value()
-            .get(feature_view_name, entity_ids, feature_names, as_of)
+            .get(entity_ids, feature_names, as_of)
             .await
             .map_err(ResolverError::Adapter)?;
 

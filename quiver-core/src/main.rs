@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let server = QuiverFlightServer::new(resolver);
 
-    let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter.set_serving::<QuiverFlightServer>().await;
 
     let reflection_service = tonic_reflection::server::Builder::configure()
