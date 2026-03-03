@@ -263,7 +263,6 @@ fn build_record_batch(
     let mut fields: Vec<Field> = Vec::with_capacity(feature_names.len() + 1);
     let mut columns: Vec<ArrayRef> = Vec::with_capacity(feature_names.len() + 1);
 
-    // entity_id — always non-null.
     fields.push(Field::new("entity_id", DataType::Utf8, false));
     let mut id_builder = StringBuilder::new();
     for eid in entity_ids {
@@ -271,7 +270,6 @@ fn build_record_batch(
     }
     columns.push(Arc::new(id_builder.finish()) as ArrayRef);
 
-    // Feature columns.
     for (feat_idx, feat_name) in feature_names.iter().enumerate() {
         let values = &resolved[feat_idx];
 

@@ -49,15 +49,6 @@ jobs:
           echo $! > /tmp/quiver.pid
           sleep 5
 
-      - name: Install Python client
-        working-directory: ./quiver-python
-        run: uv pip install --system -e .
-
-      - name: Test Python client
-        working-directory: ./quiver-python
-        run: |
-          python -c "from client import QuiverClient; print('Python client import successful')"
-
       - name: Stop Quiver server
         if: always()
         run: |

@@ -1,4 +1,5 @@
 pub mod memory;
+pub mod redis;
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
