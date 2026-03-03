@@ -9,11 +9,30 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TlsConfig {
+    pub cert_path: String,
+    pub key_path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum Compression {
+    Gzip,
+    Zstd,
+    None,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
     #[serde(default = "default_host")]
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
+    pub tls: Option<TlsConfig>,
+    pub max_concurrent_rpcs: Option<u32>,
+    pub max_message_size_mb: Option<usize>,
+    pub compression: Option<Compression>,
+    pub timeout_seconds: Option<u64>,
 }
 
 fn default_host() -> String {

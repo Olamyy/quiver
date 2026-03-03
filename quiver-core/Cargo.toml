@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 arrow = "58"
 arrow-flight = "58"
-tonic = "0.14"
+tonic = { version = "0.14", features = ["gzip", "tls-ring", "zstd"] }
 prost = "0.14"
 prost-types = "0.14"
 tokio = { version = "1.37", features = ["full"] }

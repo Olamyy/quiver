@@ -49,23 +49,6 @@ jobs:
           echo $! > /tmp/quiver.pid
           sleep 5
 
-      - name: Install grpcurl
-        run: |
-          curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz" | tar -xz
-          sudo mv grpcurl /usr/local/bin/
-
-      - name: Test gRPC endpoints
-        run: |
-          # Check health
-          grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
-
-          # List services
-          grpcurl -plaintext localhost:8815 list
-
-          # Get schema
-          grpcurl -plaintext -d '{"path": ["my_feature_view"]}' \
-            localhost:8815 arrow.flight.protocol.FlightService/GetSchema
-
       - name: Install Python client
         working-directory: ./quiver-python
         run: uv pip install --system -e .

@@ -4,7 +4,8 @@ use crate::resolver::Resolver;
 use crate::server::QuiverFlightServer;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use std::sync::Arc;
-use tonic::transport::Server;
+use tonic::codec::CompressionEncoding;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 pub mod adapters;
 pub mod config;
@@ -69,13 +70,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let resolver = Arc::new(Resolver::new(registry));
+    let resolver = Arc::new(Resolver::new(
+        registry.clone() as Arc<dyn crate::registry::Registry>
+    ));
 
     for (name, adapter_cfg) in cfg.adapters {
         match adapter_cfg {
             config::AdapterConfig::Memory => {
                 let adapter = Arc::new(MemoryAdapter::new());
-                resolver.register_adapter(name, adapter);
+                resolver
+                    .register_adapter(name, adapter as Arc<dyn crate::adapters::BackendAdapter>);
             }
             config::AdapterConfig::Redis { .. } => {
                 tracing::warn!(
@@ -116,10 +120,52 @@ Loaded {} feature views and {} adapters
         adapter_count
     );
 
-    Server::builder()
+    let mut server_builder = Server::builder();
+
+    if let Some(tls) = &cfg.server.tls {
+        let cert = std::fs::read_to_string(&tls.cert_path)?;
+        let key = std::fs::read_to_string(&tls.key_path)?;
+        let identity = Identity::from_pem(cert, key);
+        server_builder = server_builder.tls_config(ServerTlsConfig::new().identity(identity))?;
+        tracing::info!("TLS enabled with certificate: {}", tls.cert_path);
+    }
+
+    if let Some(concurrency) = cfg.server.max_concurrent_rpcs {
+        server_builder = server_builder.max_concurrent_streams(concurrency);
+    }
+
+    if let Some(timeout) = cfg.server.timeout_seconds {
+        server_builder = server_builder.timeout(std::time::Duration::from_secs(timeout));
+    }
+
+    let mut flight_service = FlightServiceServer::new(server);
+    if let Some(limit_mb) = cfg.server.max_message_size_mb {
+        let limit_bytes = limit_mb * 1024 * 1024;
+        flight_service = flight_service
+            .max_decoding_message_size(limit_bytes)
+            .max_encoding_message_size(limit_bytes);
+    }
+
+    if let Some(compression) = &cfg.server.compression {
+        match compression {
+            config::Compression::Gzip => {
+                flight_service = flight_service
+                    .accept_compressed(CompressionEncoding::Gzip)
+                    .send_compressed(CompressionEncoding::Gzip);
+            }
+            config::Compression::Zstd => {
+                flight_service = flight_service
+                    .accept_compressed(CompressionEncoding::Zstd)
+                    .send_compressed(CompressionEncoding::Zstd);
+            }
+            config::Compression::None => {}
+        }
+    }
+
+    server_builder
         .add_service(health_service)
         .add_service(reflection_service)
-        .add_service(FlightServiceServer::new(server))
+        .add_service(flight_service)
         .serve(addr)
         .await?;
 
