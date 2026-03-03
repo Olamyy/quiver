@@ -1,0 +1,13 @@
+server:
+  port: 8815
+  # host: "0.0.0.0"
+  # max_concurrent_rpcs: 256
+  # max_message_size_mb: 64
+  # timeout_seconds: 30
+  # tls:
+  #   cert_path: "/etc/quiver/server.crt"
+  #   key_path: "/etc/quiver/server.key"
+registry:
+  type: static
+  views: []
+adapters: {}

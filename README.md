@@ -109,8 +109,6 @@ Quiver is in early development. The core Arrow flight server is complete. The se
 - **Static Registry**: Centralized management of feature schemas and backend routing.
 - **gRPC Health Check**: Native support for standard health probes (`grpc.health.v1.Health`).
 - **gRPC Reflection**: Integrated service discovery for tools like `grpcurl`.
-- **Demo Seeding**: Automatic population of test data (`my_feature_view`) for immediate verification.
-
 ---
 
 ## Getting Started
@@ -121,6 +119,43 @@ Quiver is in early development. The core Arrow flight server is complete. The se
 - [grpcurl](https://github.com/fullstorydev/grpcurl) (for manual testing)
 
 ### Run the Server
+
+### Configuration
+
+Quiver uses a layered configuration system. Settings are resolved in the following order of precedence:
+
+1.  **Environment Variables**: Prefixed with `QUIVER__` (e.g., `QUIVER__SERVER__PORT=9001`).
+2.  **Config File**: A mandatory `config.yaml` file in the working directory.
+3.  **Defaults**: Internal fallbacks (Host: `0.0.0.0`, Port: `8815`).
+
+> [!IMPORTANT]
+> The server will fail to start if the `config.yaml` file is missing, or if either the `registry.views` or `adapters` sections are empty.
+
+### Example `config.yaml`
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8815
+
+registry:
+  type: static
+  views:
+    - name: "user_features"
+      entity_type: "user"
+      entity_key: "entity_id"
+      columns:
+        - name: "spend_30d"
+          arrow_type: "float64"
+          source: "memory"
+
+adapters:
+  memory:
+    type: memory
+```
+
+Once the config file is ready, you can run the server:
+
 ```bash
 cd quiver-core
 cargo run
@@ -128,6 +163,7 @@ cargo run
 The server starts on `0.0.0.0:8815` by default.
 
 ---
+
 
 ## Exploring the API
 
