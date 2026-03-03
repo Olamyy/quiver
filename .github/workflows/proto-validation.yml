@@ -2,13 +2,13 @@ name: Protobuf Validation
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
     paths:
-      - 'proto/**'
+      - "proto/**"
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
     paths:
-      - 'proto/**'
+      - "proto/**"
 
 jobs:
   validate:
@@ -38,7 +38,11 @@ jobs:
       - name: Validate proto compilation (Rust)
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Test proto build
         working-directory: ./quiver-core
         run: cargo build --features proto-only || cargo build
-

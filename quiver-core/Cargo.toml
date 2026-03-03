@@ -13,11 +13,8 @@ tokio = { version = "1.37", features = ["full"] }
 futures = "0.3"
 bytes = "1.6"
 dashmap = "6"
-hdrhistogram = "7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 async-trait = "0.1"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
@@ -25,5 +22,4 @@ tonic-health = "0.14"
 tonic-reflection = "0.14"
 
 [build-dependencies]
-tonic-build = "0.14"
-prost-build = "0.14"
+tonic-prost-build = "0.14"

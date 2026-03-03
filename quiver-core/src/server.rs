@@ -10,17 +10,13 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::proto::quiver::v1::FeatureRequest;
 use crate::resolver::Resolver;
 use arrow_flight::encode::FlightDataEncoderBuilder;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use futures::StreamExt;
 use prost::Message;
 use std::sync::Arc;
 
 pub struct QuiverFlightServer {
     resolver: Arc<Resolver>,
-}
-
-impl tonic::server::NamedService for QuiverFlightServer {
-    const NAME: &'static str = "arrow.flight.protocol.FlightService";
 }
 
 impl QuiverFlightServer {
@@ -36,14 +32,39 @@ impl FlightService for QuiverFlightServer {
         &self,
         _request: Request<Streaming<HandshakeRequest>>,
     ) -> Result<Response<Self::HandshakeStream>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+        let response = HandshakeResponse {
+            payload: "authenticated".into(),
+            protocol_version: 0,
+        };
+        let stream = futures::stream::once(async move { Ok(response) });
+        Ok(Response::new(Box::pin(stream)))
     }
     type ListFlightsStream = Pin<Box<dyn Stream<Item = Result<FlightInfo, Status>> + Send>>;
     async fn list_flights(
         &self,
         _request: Request<Criteria>,
     ) -> Result<Response<Self::ListFlightsStream>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+        let views = self
+            .resolver
+            .list_views()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list views: {}", e)))?;
+
+        let flights = views.into_iter().map(|name| FlightInfo {
+            schema: prost::bytes::Bytes::new(), // Corrected Type
+            flight_descriptor: Some(FlightDescriptor {
+                path: vec![name],
+                ..Default::default()
+            }),
+            endpoint: vec![],
+            total_records: -1,
+            total_bytes: -1,
+            ordered: false,
+            app_metadata: vec![].into(), // Corrected Type
+        });
+
+        let stream = futures::stream::iter(flights.map(Ok));
+        Ok(Response::new(Box::pin(stream)))
     }
     async fn get_flight_info(
         &self,
@@ -73,7 +94,7 @@ impl FlightService for QuiverFlightServer {
             .map_err(|e| Status::internal(format!("Failed to resolve schema: {}", e)))?;
 
         let options = arrow::ipc::writer::IpcWriteOptions::default();
-        let schema_result = arrow_flight::SchemaAsIpc::new(&schema, &options)
+        let schema_result: SchemaResult = arrow_flight::SchemaAsIpc::new(&schema, &options)
             .try_into()
             .map_err(|e| Status::internal(format!("Failed to serialize schema: {}", e)))?;
 
@@ -104,9 +125,17 @@ impl FlightService for QuiverFlightServer {
                     .iter()
                     .map(|e| e.entity_id.clone())
                     .collect::<Vec<_>>(),
-                feature_request.as_of.map(|ts| {
-                    DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or(Utc::now())
-                }),
+                feature_request
+                    .as_of
+                    .map(|ts| {
+                        DateTime::from_timestamp(ts.seconds, ts.nanos as u32).ok_or_else(|| {
+                            Status::invalid_argument(format!(
+                                "Invalid as_of timestamp: seconds={}, nanos={}",
+                                ts.seconds, ts.nanos
+                            ))
+                        })
+                    })
+                    .transpose()?,
             )
             .await
             .map_err(|e| Status::internal(format!("Resolution failed: {}", e)))?;

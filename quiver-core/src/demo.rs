@@ -51,7 +51,7 @@ pub async fn seed_demo_data(
         ],
     )?;
 
-    adapter.put(batch, "my_feature_view").await?;
+    adapter.put(batch).await?;
 
     Ok(())
 }
