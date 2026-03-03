@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tonic::transport::Server;
 
 pub mod adapters;
+pub mod config;
 pub mod demo;
 pub mod proto;
 pub mod registry;
@@ -15,68 +16,75 @@ pub mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
 
-    let addr = "0.0.0.0:8815".parse()?;
+    let cfg = config::Config::load()?;
+
+    if cfg.adapters.is_empty() {
+        return Err("Configuration error: No adapters defined".into());
+    }
+
+    let (view_count, adapter_count) = (
+        match &cfg.registry {
+            config::RegistryConfig::Static { views } => {
+                if views.is_empty() {
+                    return Err("Configuration error: Registry contains no feature views".into());
+                }
+                views.len()
+            }
+        },
+        cfg.adapters.len(),
+    );
+
+    let addr = format!("{}:{}", cfg.server.host, cfg.server.port).parse()?;
 
     let registry = Arc::new(StaticRegistry::new());
-    registry.register(crate::proto::quiver::v1::FeatureViewMetadata {
-        name: "user_features".to_string(),
-        entity_type: "user".to_string(),
-        entity_key: "entity_id".to_string(),
-        columns: vec![
-            crate::proto::quiver::v1::FeatureColumnSchema {
-                name: "spend_30d".to_string(),
-                arrow_type: "float64".to_string(),
-                nullable: true,
-            },
-            crate::proto::quiver::v1::FeatureColumnSchema {
-                name: "session_count".to_string(),
-                arrow_type: "int64".to_string(),
-                nullable: true,
-            },
-        ],
-        backend_routing: [
-            ("spend_30d".to_string(), "memory".to_string()),
-            ("session_count".to_string(), "memory".to_string()),
-        ]
-        .into(),
-        schema_version: 1,
-    });
 
-    let adapter = Arc::new(MemoryAdapter::seed([
-        (
-            "user:101",
-            vec![
-                (
-                    "spend_30d",
-                    crate::adapters::memory::ScalarValue::Float64(890.0),
-                ),
-                (
-                    "session_count",
-                    crate::adapters::memory::ScalarValue::Int64(23),
-                ),
-            ],
-            chrono::Utc::now(),
-        ),
-        (
-            "user:102",
-            vec![
-                (
-                    "spend_30d",
-                    crate::adapters::memory::ScalarValue::Float64(120.0),
-                ),
-                (
-                    "session_count",
-                    crate::adapters::memory::ScalarValue::Int64(4),
-                ),
-            ],
-            chrono::Utc::now(),
-        ),
-    ]));
+    let config::RegistryConfig::Static { views } = cfg.registry;
+    for view in views {
+        let mut backend_routing = std::collections::HashMap::new();
+        for col in &view.columns {
+            backend_routing.insert(col.name.clone(), col.source.clone());
+        }
+
+        registry.register(crate::proto::quiver::v1::FeatureViewMetadata {
+            name: view.name,
+            entity_type: view.entity_type,
+            entity_key: view.entity_key,
+            columns: view
+                .columns
+                .into_iter()
+                .map(|c| crate::proto::quiver::v1::FeatureColumnSchema {
+                    name: c.name,
+                    arrow_type: c.arrow_type,
+                    nullable: c.nullable,
+                })
+                .collect(),
+            backend_routing,
+            schema_version: view.schema_version,
+        });
+    }
 
     let resolver = Arc::new(Resolver::new(registry));
-    resolver.register_adapter("memory".to_string(), adapter);
+
+    for (name, adapter_cfg) in cfg.adapters {
+        match adapter_cfg {
+            config::AdapterConfig::Memory => {
+                let adapter = Arc::new(MemoryAdapter::new());
+                resolver.register_adapter(name, adapter);
+            }
+            config::AdapterConfig::Redis { .. } => {
+                tracing::warn!(
+                    "Redis adapter configured for '{}' but not yet implemented",
+                    name
+                );
+            }
+        }
+    }
 
     let server = QuiverFlightServer::new(resolver);
 
@@ -92,7 +100,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET)
         .build_v1()?;
 
-    tracing::info!("Quiver listening on {}", addr);
+    tracing::info!(
+        r#"
+   ____        _                
+  / __ \__  __(_)   _____  _____
+ / / / / / / / / | | / _ \/ ___/
+/ /_/ / /_/ / /| |_| /  __/ /    
+\___\_\__,_/_/ |____/\___/_/     
+                                 
+Quiver Flight Server starting up on {}
+Loaded {} feature views and {} adapters
+"#,
+        addr,
+        view_count,
+        adapter_count
+    );
 
     Server::builder()
         .add_service(health_service)

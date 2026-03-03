@@ -143,6 +143,18 @@ impl BackendAdapter for MemoryAdapter {
         feature_names: &[String],
         as_of: Option<DateTime<Utc>>,
     ) -> Result<RecordBatch, AdapterError> {
+        if entity_ids.is_empty() {
+            return Err(AdapterError::invalid(
+                BACKEND_NAME,
+                "entity_ids cannot be empty",
+            ));
+        }
+        if feature_names.is_empty() {
+            return Err(AdapterError::invalid(
+                BACKEND_NAME,
+                "feature_names cannot be empty",
+            ));
+        }
         let cutoff = as_of.unwrap_or_else(Utc::now);
         let rows = self.rows.read().unwrap();
 

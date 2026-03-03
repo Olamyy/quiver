@@ -1,0 +1,6 @@
+server:
+  port: 8815
+registry:
+  type: static
+  views: []
+adapters: {}
