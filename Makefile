@@ -100,11 +100,11 @@ check: .protoc
 
 .PHONY: run
 run: .protoc 
-	cd quiver-core && cargo run
+	cd quiver-core && cargo run $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: run-release
 run-release: .protoc 
-	cd quiver-core && cargo run --release
+	cd quiver-core && cargo run --release $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: quality
 quality: format lint 
@@ -148,6 +148,38 @@ bench-criterion: ## Run precise Criterion-based benchmarks
 .PHONY: bench-report
 bench-report: ## Generate and display benchmark reports
 	cd benchmarks && cargo run --bin benchmark && echo "Check reports/ directory for detailed results"
+
+# Python Benchmarks
+
+.PHONY: bench-py
+bench-py: ## Run Python benchmark suite (all methods)
+	@echo "Setting up Python benchmark environment..."
+	cd benchmarks/python && uv sync
+	@echo "Running Python benchmark suite..."
+	cd benchmarks/python && uv run python run_benchmark.py run --scenario standard
+
+.PHONY: bench-py-quick
+bench-py-quick: ## Run quick Python benchmark verification
+	@echo "Running quick Python benchmark..."
+	cd benchmarks/python && uv sync
+	cd benchmarks/python && uv run python run_benchmark.py run --scenario quick
+
+.PHONY: bench-py-heavy
+bench-py-heavy: ## Run heavy Python benchmark suite
+	@echo "Running heavy Python benchmark..."
+	cd benchmarks/python && uv sync
+	cd benchmarks/python && uv run python run_benchmark.py run --scenario heavy
+
+.PHONY: bench-py-http
+bench-py-http: ## Start HTTP server for Python benchmarks
+	@echo "Starting FastAPI server for benchmarks..."
+	cd benchmarks/python && uv sync
+	cd benchmarks/python && uv run python servers/http_server.py
+
+.PHONY: bench-py-scenarios
+bench-py-scenarios: ## List available Python benchmark scenarios
+	cd benchmarks/python && uv sync
+	cd benchmarks/python && uv run python run_benchmark.py list-scenarios
 
 .PHONY: main
 main: quality test 

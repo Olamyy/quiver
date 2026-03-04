@@ -1,5 +1,3 @@
-"""Custom exceptions for Quiver Python client."""
-
 from typing import List, Optional
 
 

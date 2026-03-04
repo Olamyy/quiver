@@ -1,11 +1,12 @@
 import time
 from datetime import datetime
-from typing import List, Optional, Any, cast, Tuple
+from typing import List, Optional, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import logging
 
 import pyarrow as pa
 import pyarrow.flight as flight
+from google.protobuf import timestamp_pb2
 
 from ._types import (
     EntityId,
@@ -24,6 +25,7 @@ from .exceptions import (
 )
 from .models import FeatureRequest, RequestContext, FeatureViewInfo
 from .table import FeatureTable
+from .proto import serving_pb2, types_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +59,6 @@ class Client:
         default_null_strategy: NullStrategy = "fill_null",
         validate_connection: bool = False,
     ) -> None:
-        # Validate inputs immediately
-        if not isinstance(address, str) or not address.strip():
-            raise QuiverValidationError("address cannot be empty")
-
-        if timeout <= 0:
-            raise QuiverValidationError("timeout must be positive")
-
-        if max_retries < 0:
-            raise QuiverValidationError("max_retries cannot be negative")
-
-        # Parse address into host and port
         self._host, self._port = self._normalize_address(address)
         self._timeout = timeout
         self._max_retries = max_retries
@@ -75,57 +66,34 @@ class Client:
         self._default_null_strategy = default_null_strategy
         self._closed = False
 
-        # Initialize Flight client
         try:
             location = flight.Location.for_grpc_tcp(self._host, self._port)
             self._flight_client = flight.FlightClient(location)
-        except Exception as e:
-            # For development, create a mock client if Flight fails
-            logger.warning(f"Flight client creation failed: {e}. Using mock mode.")
+        except Exception:  # noqa
             self._flight_client = None
 
-        # Validate connection if requested
-        if validate_connection and self._flight_client:
+        if not self._flight_client:
+            raise QuiverConnectionError(
+                "Failed to create Flight client", f"{self._host}:{self._port}"
+            )
+
+        if validate_connection:
             self._validate_connection()
 
-    def _normalize_address(self, address: str) -> Tuple[str, int]:
-        """Parse address into host and port.
-
-        Args:
-            address: Address in various formats:
-                - "localhost:8815"
-                - "grpc://localhost:8815"
-                - "127.0.0.1:8815"
-                - "localhost" (defaults to port 8815)
-
-        Returns:
-            Tuple of (host, port)
-
-        Raises:
-            QuiverValidationError: If address format is invalid
-        """
+    @staticmethod
+    def _normalize_address(address: str) -> Tuple[str, int]:
+        """Parse address into host and port."""
         address = address.strip()
 
-        # Remove protocol prefix if present
         if address.startswith(("grpc://", "grpc+tls://")):
             address = address.split("://", 1)[1]
 
-        # Parse host:port
         if ":" in address:
             host, port_str = address.rsplit(":", 1)
-            try:
-                port = int(port_str)
-                if not (1 <= port <= 65535):
-                    raise ValueError("Port out of range")
-            except ValueError as e:
-                raise QuiverValidationError(f"Invalid port in address '{address}': {e}")
+            port = int(port_str)
         else:
-            # Default to port 8815 for Quiver
             host = address
             port = 8815
-
-        if not host:
-            raise QuiverValidationError("Host cannot be empty")
 
         return host, port
 
@@ -160,9 +128,6 @@ class Client:
     ) -> FeatureTable:
         """Get features for specified entities.
 
-        This implementation provides the complete interface but uses mock data
-        until protobuf integration is completed.
-
         Args:
             feature_view: Name of the feature view to query
             entities: List of entity IDs to get features for
@@ -188,10 +153,8 @@ class Client:
         if self._closed:
             raise QuiverValidationError("Client is closed")
 
-        # Create and validate request - this validates all inputs
-        effective_null_strategy = null_strategy or cast(
-            NullStrategy, self._default_null_strategy
-        )
+        effective_null_strategy = null_strategy or self._default_null_strategy
+
         request = FeatureRequest(
             feature_view=feature_view,
             entities=entities,
@@ -202,74 +165,114 @@ class Client:
 
         effective_timeout = timeout or self._timeout
 
-        # TODO: Replace with actual Flight/proto implementation
-        return self._create_mock_response(
-            request, include_timestamps, include_freshness
+        proto_request = self._build_proto_request(
+            request, include_timestamps, include_freshness, context
         )
+        return self._execute_flight_request(proto_request, effective_timeout)
 
-    def _create_mock_response(
-        self, request: FeatureRequest, include_timestamps: bool, include_freshness: bool
+    @staticmethod
+    def _build_proto_request(
+        request: FeatureRequest,
+        include_timestamps: bool,
+        include_freshness: bool,
+        context: Optional[RequestContext],
+    ) -> serving_pb2.FeatureRequest:  # noqa
+        """Build protobuf FeatureRequest from Python request."""
+        proto_request = serving_pb2.FeatureRequest()  # noqa
+        proto_request.feature_view = request.feature_view
+        proto_request.feature_names.extend(request.features)
+
+        for entity_id in request.entities:
+            entity_key = types_pb2.EntityKey()  # noqa
+            entity_key.entity_type = "default"
+            entity_key.entity_id = entity_id
+            proto_request.entities.append(entity_key)
+
+        if request.as_of:
+            timestamp = timestamp_pb2.Timestamp()  # noqa
+            timestamp.FromDatetime(request.as_of)
+            proto_request.as_of.CopyFrom(timestamp)
+
+        output_options = serving_pb2.OutputOptions()  # noqa
+        output_options.include_timestamps = include_timestamps
+        output_options.include_freshness = include_freshness
+        output_options.null_strategy = request.null_strategy or "fill_null"
+        proto_request.output.CopyFrom(output_options)
+
+        if context:
+            context_proto = types_pb2.RequestContext()  # noqa
+            context_proto.request_id = context.request_id or ""
+            context_proto.caller = context.caller or ""
+            context_proto.environment = context.environment or ""
+            proto_request.context.CopyFrom(context_proto)
+
+        return proto_request
+
+    def _execute_flight_request(
+        self,
+        proto_request: serving_pb2.FeatureRequest, # noqa
+        timeout: float,  # noqa
     ) -> FeatureTable:
-        """Create realistic mock response demonstrating full interface."""
-        num_entities = len(request.entities)
+        """Execute the Flight request with retry logic."""
+        if not self._flight_client:
+            raise QuiverConnectionError("Flight client not connected")
 
-        # Build schema and data
-        schema_fields = [pa.field("entity_id", pa.string())]
-        arrays = [pa.array(request.entities)]
+        last_exception = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                ticket_data = proto_request.SerializeToString()
+                ticket = flight.Ticket(ticket_data)
 
-        # Generate realistic mock feature data
-        for feature in request.features:
-            if feature == "age":
-                values = [25 + (i * 5) % 40 for i in range(num_entities)]  # Ages 25-65
-                schema_fields.append(pa.field(feature, pa.int64()))
-                arrays.append(pa.array(values))
-            elif feature == "tier":
-                tiers = ["platinum", "gold", "silver", "bronze"]
-                values = [tiers[i % len(tiers)] for i in range(num_entities)]
-                schema_fields.append(pa.field(feature, pa.string()))
-                arrays.append(pa.array(values))
-            elif feature == "total_orders":
-                values = [
-                    10 + (i * 3) % 100 for i in range(num_entities)
-                ]  # Orders 10-109
-                schema_fields.append(pa.field(feature, pa.int64()))
-                arrays.append(pa.array(values))
-            elif feature == "avg_order_value":
-                values = [
-                    50.0 + (i * 12.5) % 200.0 for i in range(num_entities)
-                ]  # $50-250
-                schema_fields.append(pa.field(feature, pa.float64()))
-                arrays.append(pa.array(values))
-            else:
-                # Default to numeric values
-                values = [1.0 + i * 0.5 for i in range(num_entities)]
-                schema_fields.append(pa.field(feature, pa.float64()))
-                arrays.append(pa.array(values))
+                start_time = time.time()
+                flight_reader = self._flight_client.do_get(ticket)
 
-        # Add optional timestamp column
-        if include_timestamps:
-            schema_fields.append(pa.field("feature_timestamp", pa.timestamp("us")))
-            current_ts = int(time.time() * 1000000)
-            ts_values = [
-                current_ts - (i * 60000000) for i in range(num_entities)
-            ]  # Stagger timestamps
-            arrays.append(pa.array(ts_values))
+                batches = []
+                schema = None
 
-        # Add optional freshness metadata
-        if include_freshness:
-            schema_fields.append(pa.field("freshness_score", pa.float64()))
-            freshness_values = [
-                0.95 - (i * 0.01) % 0.2 for i in range(num_entities)
-            ]  # 0.75-0.95
-            arrays.append(pa.array(freshness_values))
+                for batch_reader in flight_reader:
+                    if schema is None:
+                        schema = batch_reader.schema
+                    batches.extend(batch_reader.to_batches())
 
-        schema = pa.schema(schema_fields)
-        table = pa.table(arrays, schema=schema)
+                    if time.time() - start_time > timeout:
+                        raise QuiverTimeoutError(f"Request timed out after {timeout}s")
 
-        logger.info(
-            f"Generated mock response: {table.num_rows} rows, {table.num_columns} columns"
-        )
-        return FeatureTable(table)
+                if batches:
+                    table = pa.Table.from_batches(batches, schema) # noqa
+                else:
+                    table = pa.Table.from_arrays([], schema or pa.schema([])) # noqa
+
+                logger.debug(
+                    f"Retrieved {table.num_rows} rows in {time.time() - start_time:.2f}s"
+                )
+                return FeatureTable(table)
+
+            except flight.FlightUnavailableError as e:
+                last_exception = QuiverConnectionError(
+                    f"Server unavailable: {str(e)}", f"{self._host}:{self._port}"
+                )
+            except flight.FlightTimedOutError as e:
+                raise QuiverTimeoutError(f"Request timed out: {str(e)}")
+            except flight.FlightError as e:
+                error_msg = str(e).lower()
+                if "not found" in error_msg or proto_request.feature_view in error_msg:
+                    raise QuiverFeatureViewNotFound(proto_request.feature_view)
+                elif "feature" in error_msg:
+                    raise QuiverFeatureNotFound(list(proto_request.feature_names))
+                else:
+                    raise QuiverValidationError(f"Invalid request: {str(e)}")
+
+            except Exception as e:
+                last_exception = QuiverServerError(f"Unexpected error: {str(e)}")
+
+            if attempt < self._max_retries:
+                wait_time = min(2.0**attempt, 10.0)
+                time.sleep(wait_time)
+                logger.warning(
+                    f"Request failed, retrying in {wait_time}s (attempt {attempt + 1}/{self._max_retries + 1})"
+                )
+
+        raise last_exception or QuiverServerError("Request failed after all retries")
 
     def get_features_batch(self, requests: List[FeatureRequest]) -> List[FeatureTable]:
         """Get features for multiple requests in parallel."""
@@ -279,7 +282,6 @@ class Client:
         if not requests:
             return []
 
-        # Use thread pool for parallel execution
         with ThreadPoolExecutor(max_workers=min(len(requests), 10)) as executor:
             futures = []
             for req in requests:
@@ -293,7 +295,6 @@ class Client:
                 )
                 futures.append(future)
 
-            # Collect results
             results = []
             for future in futures:
                 results.append(future.result())
@@ -305,37 +306,23 @@ class Client:
         if self._closed:
             raise QuiverValidationError("Client is closed")
 
-        # For mock mode, return realistic sample views
-        sample_schemas = {
-            "user_features": pa.schema(
-                [
-                    pa.field("entity_id", pa.string()),
-                    pa.field("age", pa.int64()),
-                    pa.field("tier", pa.string()),
-                    pa.field("total_orders", pa.int64()),
-                    pa.field("avg_order_value", pa.float64()),
-                ]
-            ),
-            "product_features": pa.schema(
-                [
-                    pa.field("entity_id", pa.string()),
-                    pa.field("category", pa.string()),
-                    pa.field("price", pa.float64()),
-                    pa.field("rating", pa.float64()),
-                    pa.field("review_count", pa.int64()),
-                ]
-            ),
-        }
+        try:
+            flight_infos = list(self._flight_client.list_flights())
+            views = []
 
-        views = []
-        for name, schema in sample_schemas.items():
-            view_info = FeatureViewInfo(
-                name=name,
-                schema=schema,
-                backend="memory",  # Mock backend
-                entity_types=["default"],
-            )
-            views.append(view_info)
+            for info in flight_infos:
+                if info.descriptor and info.descriptor.path:
+                    view_name = info.descriptor.path[0]
+                    view_info = FeatureViewInfo(
+                        name=view_name,
+                        schema=info.schema,
+                        backend="unknown",
+                        entity_types=["default"],
+                    )
+                    views.append(view_info)
+
+        except Exception as e:
+            raise QuiverServerError(f"Failed to list feature views: {str(e)}")
 
         return views
 

@@ -1,5 +1,3 @@
-"""Data classes for Quiver requests and responses."""
-
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
@@ -72,7 +70,7 @@ class FeatureViewInfo:
     """Information about a feature view."""
 
     name: str
-    schema: pa.Schema
+    schema: pa.Schema # noqa
     backend: str
     entity_types: List[str]
 

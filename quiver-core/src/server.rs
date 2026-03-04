@@ -6,9 +6,13 @@ use arrow_flight::{
 use futures::Stream;
 use std::pin::Pin;
 use tonic::{Request, Response, Status, Streaming};
+use tracing::{info, debug};
+use std::time::Instant;
+use serde_json::json;
 
 use crate::proto::quiver::v1::FeatureRequest;
 use crate::resolver::Resolver;
+use crate::config::AccessLogConfig;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use chrono::DateTime;
 use futures::StreamExt;
@@ -17,11 +21,59 @@ use std::sync::Arc;
 
 pub struct QuiverFlightServer {
     resolver: Arc<Resolver>,
+    access_log_config: Option<AccessLogConfig>,
 }
 
 impl QuiverFlightServer {
-    pub fn new(resolver: Arc<Resolver>) -> Self {
-        Self { resolver }
+    pub fn new(resolver: Arc<Resolver>, access_log_config: Option<AccessLogConfig>) -> Self {
+        Self { 
+            resolver,
+            access_log_config,
+        }
+    }
+    
+    fn log_request(&self, endpoint: &str, feature_view: Option<&str>, entity_count: Option<usize>, 
+                   feature_count: Option<usize>, duration: std::time::Duration, status: &str, error: Option<&str>) {
+        if let Some(config) = &self.access_log_config {
+            if !config.enabled {
+                return;
+            }
+            
+            match config.format.as_str() {
+                "json" => {
+                    let mut log_entry = json!({
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                        "endpoint": endpoint,
+                        "duration_ms": duration.as_millis(),
+                        "status": status
+                    });
+                    
+                    if let Some(view) = feature_view {
+                        log_entry["feature_view"] = json!(view);
+                    }
+                    if let Some(count) = entity_count {
+                        log_entry["entity_count"] = json!(count);
+                    }
+                    if let Some(count) = feature_count {
+                        log_entry["feature_count"] = json!(count);
+                    }
+                    if let Some(err) = error {
+                        log_entry["error"] = json!(err);
+                    }
+                    
+                    info!(target: "access", "{}", log_entry);
+                }
+                _ => {
+                    let view_info = feature_view.map(|v| format!(" view={}", v)).unwrap_or_default();
+                    let entity_info = entity_count.map(|c| format!(" entities={}", c)).unwrap_or_default();
+                    let feature_info = feature_count.map(|c| format!(" features={}", c)).unwrap_or_default();
+                    let error_info = error.map(|e| format!(" error={}", e)).unwrap_or_default();
+                    
+                    info!(target: "access", "{} {}ms{}{}{}{}", 
+                          endpoint, duration.as_millis(), view_info, entity_info, feature_info, error_info);
+                }
+            }
+        }
     }
 }
 
@@ -161,18 +213,33 @@ impl FlightService for QuiverFlightServer {
         &self,
         request: Request<Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
+        let start_time = Instant::now();
         let ticket = request.into_inner();
-        let feature_request = FeatureRequest::decode(ticket.ticket).map_err(|e| {
-            Status::invalid_argument(format!(
-                "Failed to decode Ticket into FeatureRequest: {}",
-                e
-            ))
-        })?;
+        
+        let feature_request = match FeatureRequest::decode(ticket.ticket) {
+            Ok(req) => req,
+            Err(e) => {
+                let duration = start_time.elapsed();
+                self.log_request("do_get", None, None, None, duration, "error", 
+                               Some(&format!("decode_failed: {}", e)));
+                return Err(Status::invalid_argument(format!(
+                    "Failed to decode Ticket into FeatureRequest: {}",
+                    e
+                )));
+            }
+        };
 
-        let batch = self
+        let feature_view = &feature_request.feature_view;
+        let entity_count = feature_request.entities.len();
+        let feature_count = feature_request.feature_names.len();
+
+        debug!("Processing feature request: view={}, entities={}, features={}", 
+               feature_view, entity_count, feature_count);
+
+        let batch_result = self
             .resolver
             .resolve(
-                &feature_request.feature_view,
+                feature_view,
                 &feature_request.feature_names,
                 &feature_request
                     .entities
@@ -191,18 +258,32 @@ impl FlightService for QuiverFlightServer {
                     })
                     .transpose()?,
             )
-            .await
-            .map_err(|e| Status::internal(format!("Resolution failed: {}", e)))?;
+            .await;
 
-        let stream = FlightDataEncoderBuilder::new()
-            .build(futures::stream::once(async move { Ok(batch) }))
-            .map(
-                |res: Result<FlightData, arrow_flight::error::FlightError>| {
-                    res.map_err(|e| Status::internal(format!("Flight encoding error: {}", e)))
-                },
-            );
+        let duration = start_time.elapsed();
 
-        Ok(Response::new(Box::pin(stream)))
+        match batch_result {
+            Ok(batch) => {
+                self.log_request("do_get", Some(feature_view), Some(entity_count), 
+                               Some(feature_count), duration, "success", None);
+
+                let stream = FlightDataEncoderBuilder::new()
+                    .build(futures::stream::once(async move { Ok(batch) }))
+                    .map(
+                        |res: Result<FlightData, arrow_flight::error::FlightError>| {
+                            res.map_err(|e| Status::internal(format!("Flight encoding error: {}", e)))
+                        },
+                    );
+
+                Ok(Response::new(Box::pin(stream)))
+            }
+            Err(e) => {
+                let error_msg = format!("Resolution failed: {}", e);
+                self.log_request("do_get", Some(feature_view), Some(entity_count), 
+                               Some(feature_count), duration, "error", Some(&error_msg));
+                Err(Status::internal(error_msg))
+            }
+        }
     }
 
     type DoPutStream = Pin<Box<dyn Stream<Item = Result<PutResult, Status>> + Send>>;
