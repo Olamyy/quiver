@@ -3,8 +3,20 @@ name: Integration Tests
 on:
   push:
     branches: [main, develop]
+    paths:
+      - "quiver-core/**"
+      - "quiver-python/**"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/integration-tests.yml"
   pull_request:
     branches: [main, develop]
+    paths:
+      - "quiver-core/**"
+      - "quiver-python/**"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/integration-tests.yml"
 
 jobs:
   integration-test:
@@ -38,9 +50,11 @@ jobs:
             quiver-core/target
           key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install Python dependencies
+        run: make install-py
+
       - name: Build Rust server
-        working-directory: ./quiver-core
-        run: cargo build --release
+        run: make build-release
 
       - name: Start Quiver server
         working-directory: ./quiver-core

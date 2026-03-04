@@ -6,12 +6,14 @@ on:
     paths:
       - "quiver-core/**"
       - "proto/**"
+      - "Makefile"
       - ".github/workflows/rust-ci.yml"
   pull_request:
     branches: [main, develop]
     paths:
       - "quiver-core/**"
       - "proto/**"
+      - "Makefile"
       - ".github/workflows/rust-ci.yml"
 
 env:
@@ -58,8 +60,7 @@ jobs:
             ${{ runner.os }}-cargo-target-
 
       - name: Check
-        working-directory: ./quiver-core
-        run: cargo check --all-features
+        run: make check
 
   test:
     name: Test Suite
@@ -100,8 +101,7 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.rust }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
-        working-directory: ./quiver-core
-        run: cargo test --all-features
+        run: make test-rs
 
   fmt:
     name: Rustfmt
@@ -120,8 +120,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check formatting
-        working-directory: ./quiver-core
-        run: cargo fmt --all -- --check
+        run: |
+          cd quiver-core && cargo fmt --all -- --check
 
   clippy:
     name: Clippy
@@ -158,8 +158,7 @@ jobs:
           key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        working-directory: ./quiver-core
-        run: cargo clippy --all-features -- -D warnings
+        run: make lint-rs
 
   coverage:
     name: Code Coverage
@@ -175,12 +174,8 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
-
       - name: Generate coverage
-        working-directory: ./quiver-core
-        run: cargo tarpaulin --out xml --output-dir ../
+        run: make testcov
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
