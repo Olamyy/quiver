@@ -91,7 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 password,
                 key_template,
             } => {
-                let adapter = RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
+                let adapter =
+                    RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
                 resolver.register_adapter(
                     name,
                     Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,

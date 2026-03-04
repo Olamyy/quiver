@@ -41,7 +41,6 @@ async fn test_ingestion_retrieval_loop() {
             .unwrap();
     });
 
-    // Wait for server to start
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let channel = tonic::transport::Channel::from_shared(format!("http://{}", real_addr))
@@ -51,7 +50,6 @@ async fn test_ingestion_retrieval_loop() {
         .unwrap();
     let mut client = FlightServiceClient::new(channel);
 
-    // 3. do_put (Ingest)
     let schema = Arc::new(arrow::datatypes::Schema::new(vec![
         arrow::datatypes::Field::new("entity_id", arrow::datatypes::DataType::Utf8, false),
         arrow::datatypes::Field::new("val", arrow::datatypes::DataType::Float64, true),
@@ -73,7 +71,6 @@ async fn test_ingestion_retrieval_loop() {
     let put_stream = encoder.map(|res| res.unwrap());
     client.do_put(put_stream).await.unwrap();
 
-    // 4. do_get (Retrieve)
     let mut backend_routing = std::collections::HashMap::new();
     backend_routing.insert("val".to_string(), "memory".to_string());
 
@@ -135,7 +132,6 @@ async fn test_get_flight_info() {
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
-    // Register a feature view
     registry.register(quiver_core::proto::quiver::v1::FeatureViewMetadata {
         name: "user_features".to_string(),
         entity_type: "user".to_string(),
@@ -178,7 +174,6 @@ async fn test_get_flight_info() {
             .unwrap();
     });
 
-    // Wait for server to start
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let channel = tonic::transport::Channel::from_shared(format!("http://{}", real_addr))
@@ -189,40 +184,68 @@ async fn test_get_flight_info() {
 
     let mut client = FlightServiceClient::new(channel);
 
-    // Test get_flight_info
     let descriptor = FlightDescriptor::new_path(vec!["user_features".to_string()]);
     let flight_info_response = client.get_flight_info(descriptor).await.unwrap();
     let flight_info = flight_info_response.into_inner();
 
     assert!(!flight_info.schema.is_empty(), "Schema should not be empty");
     assert_eq!(flight_info.endpoint.len(), 1, "Should have one endpoint");
-    assert_eq!(flight_info.total_records, -1, "Total records should be unknown (-1) per F-01");
-    assert_eq!(flight_info.total_bytes, -1, "Total bytes should be unknown (-1) per F-01");
-    assert_eq!(flight_info.ordered, false, "Results should not be ordered per F-01");
-    
-    assert!(flight_info.flight_descriptor.is_some(), "Flight descriptor should be preserved");
-    let returned_descriptor = flight_info.flight_descriptor.unwrap();
-    assert_eq!(returned_descriptor.path, vec!["user_features"], "Path should be preserved");
-    
-    let app_metadata = String::from_utf8(flight_info.app_metadata.to_vec()).unwrap();
-    assert!(app_metadata.contains("entity_type:user"), "Should contain entity type metadata");
-    assert!(app_metadata.contains("schema_version:1"), "Should contain schema version metadata");
-    assert!(app_metadata.contains("backends:score:memory"), "Should contain backend routing metadata");
+    assert_eq!(
+        flight_info.total_records, -1,
+        "Total records should be unknown (-1) per F-01"
+    );
+    assert_eq!(
+        flight_info.total_bytes, -1,
+        "Total bytes should be unknown (-1) per F-01"
+    );
+    assert_eq!(
+        flight_info.ordered, false,
+        "Results should not be ordered per F-01"
+    );
 
-    // Verify endpoint structure per F-01 specification
+    assert!(
+        flight_info.flight_descriptor.is_some(),
+        "Flight descriptor should be preserved"
+    );
+    let returned_descriptor = flight_info.flight_descriptor.unwrap();
+    assert_eq!(
+        returned_descriptor.path,
+        vec!["user_features"],
+        "Path should be preserved"
+    );
+
+    let app_metadata = String::from_utf8(flight_info.app_metadata.to_vec()).unwrap();
+    assert!(
+        app_metadata.contains("entity_type:user"),
+        "Should contain entity type metadata"
+    );
+    assert!(
+        app_metadata.contains("schema_version:1"),
+        "Should contain schema version metadata"
+    );
+    assert!(
+        app_metadata.contains("backends:score:memory"),
+        "Should contain backend routing metadata"
+    );
+
     let endpoint = &flight_info.endpoint[0];
-    assert!(endpoint.ticket.is_some(), "Endpoint should have a ticket for data retrieval");
-    assert!(endpoint.location.is_empty(), "Empty location means same server per F-01");
+    assert!(
+        endpoint.ticket.is_some(),
+        "Endpoint should have a ticket for data retrieval"
+    );
+    assert!(
+        endpoint.location.is_empty(),
+        "Empty location means same server per F-01"
+    );
     assert!(endpoint.expiration_time.is_none(), "No expiration time set");
-    
-    // Verify schema bytes are properly formatted (validates Arrow IPC serialization)
+
     let schema_bytes = &flight_info.schema;
     assert!(!schema_bytes.is_empty(), "Schema bytes should not be empty");
-    assert!(schema_bytes.len() > 50, "Schema should contain substantial metadata");
-    
-    // The schema bytes should be in valid Arrow IPC format
-    // This validates our SchemaAsIpc serialization is working correctly
-    
+    assert!(
+        schema_bytes.len() > 50,
+        "Schema should contain substantial metadata"
+    );
+
     println!("F-01 get_flight_info implementation verified - returns proper FlightInfo structure");
 
     let _ = tx.send(());
