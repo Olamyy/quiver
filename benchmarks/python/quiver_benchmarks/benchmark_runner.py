@@ -210,10 +210,9 @@ class BenchmarkRunner:
         entities_per_request = min(10, self.config.num_entities)
         max_entity_id = self.config.num_entities - 1
 
-        return [
-            f"entity_{random.randint(0, max_entity_id)}"
-            for _ in range(entities_per_request)
-        ]
+        # Use random.sample to ensure unique entities (no duplicates)
+        entity_indices = random.sample(range(max_entity_id + 1), entities_per_request)
+        return [f"entity_{i}" for i in entity_indices]
 
     def generate_request_features(self) -> List[str]:
         """Generate feature names for a single request"""
