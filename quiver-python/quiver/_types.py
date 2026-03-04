@@ -1,5 +1,3 @@
-"""Type definitions and aliases for Quiver Python client."""
-
 from typing import Literal
 from typing_extensions import TypeAlias
 

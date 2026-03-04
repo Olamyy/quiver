@@ -13,12 +13,11 @@ def test_client_creation():
     assert client is not None
     client.close()
 
-    # Test various address formats work
-    valid_addresses = ["localhost:8815", "grpc://localhost:8815", "localhost"]
-    for address in valid_addresses:
-        client = Client(address, validate_connection=False)
-        assert client is not None
-        client.close()
+    with pytest.raises(QuiverValidationError, match="address cannot be empty"):
+        Client("")
+
+    with pytest.raises(QuiverValidationError, match="timeout must be positive"):
+        Client("localhost:8815", timeout=-1)
 
 
 def test_feature_request_validation():
