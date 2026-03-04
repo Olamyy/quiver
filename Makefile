@@ -72,7 +72,7 @@ test: test-rs pytest
 
 .PHONY: testcov
 testcov: .protoc 
-	@cargo tarpaulin --version > /dev/null 2>&1 || echo 'Please run: `cargo install cargo-tarpaulin`'
+	@cargo tarpaulin --version > /dev/null 2>&1 || cargo install cargo-tarpaulin
 	cd quiver-core && cargo tarpaulin --out xml --output-dir ..
 	cd quiver-core && cargo tarpaulin --out html --output-dir ..
 	@echo ""
