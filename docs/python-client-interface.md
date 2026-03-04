@@ -62,11 +62,11 @@ class FeatureViewInfo:
 try:
     features = client.get_features("user_features", ["user_123"], ["age"])
 except quiver.FeatureViewNotFound:
-    # Handle missing feature view
+# Handle missing feature view
 except quiver.FeatureNotFound as e:
-    # Handle missing features: e.missing_features 
-except quiver.ConnectionError:
-    # Handle server connection issues
+# Handle missing features: e.missing_features 
+except quiver.QuiverConnectionError:
+# Handle server connection issues
 ```
 
 ## Key Design Decisions
