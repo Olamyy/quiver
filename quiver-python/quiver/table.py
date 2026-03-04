@@ -5,8 +5,8 @@ from typing import List, Optional, Any, TYPE_CHECKING
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    import pandas
-    import numpy
+    import pandas # type: ignore
+    import numpy # type: ignore
 
 from .exceptions import QuiverValidationError
 
@@ -74,7 +74,6 @@ class FeatureTable:
         except ImportError:
             raise ImportError("torch is required for to_torch()")
 
-        # Convert to numpy first, then to torch
         arr = self.to_numpy(columns)
         return torch.from_numpy(arr)
 

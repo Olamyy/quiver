@@ -65,12 +65,6 @@ class QuiverTimeoutError(QuiverError):
         super().__init__(f"Timeout error: {message}")
 
 
-# Create aliases for easier import
-FeatureViewNotFound = QuiverFeatureViewNotFound
-FeatureNotFound = QuiverFeatureNotFound
-ServerError = QuiverServerError
-TimeoutError = QuiverTimeoutError
-
 __all__ = [
     "QuiverError",
     "QuiverConnectionError",
@@ -79,9 +73,4 @@ __all__ = [
     "QuiverFeatureNotFound",
     "QuiverServerError",
     "QuiverTimeoutError",
-    # Aliases
-    "FeatureViewNotFound",
-    "FeatureNotFound",
-    "ServerError",
-    "TimeoutError",
 ]

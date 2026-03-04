@@ -15,12 +15,10 @@ from .exceptions import (
     QuiverValidationError,
     QuiverFeatureViewNotFound,
     QuiverFeatureNotFound,
+    QuiverServerError,
+    QuiverTimeoutError,
 )
 from ._types import EntityId, FeatureName, FeatureViewName, NullStrategy
-
-# Backward compatibility aliases
-ValidationError = QuiverValidationError
-ConnectionError = QuiverConnectionError
 
 __version__ = "0.1.0"
 
@@ -37,8 +35,8 @@ __all__ = [
     "QuiverValidationError",
     "QuiverFeatureViewNotFound",
     "QuiverFeatureNotFound",
-    "ValidationError",  # Alias for backward compatibility
-    "ConnectionError",  # Alias for backward compatibility
+    "QuiverServerError",
+    "QuiverTimeoutError",
     "EntityId",
     "FeatureName",
     "FeatureViewName",

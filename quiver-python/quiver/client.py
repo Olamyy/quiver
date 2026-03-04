@@ -1,8 +1,6 @@
-"""Core Quiver client implementation (working version without proto dependencies)."""
-
 import time
 from datetime import datetime
-from typing import List, Optional, Any, cast
+from typing import List, Optional, Any, cast, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import logging
 
@@ -19,12 +17,12 @@ from ._types import (
 from .exceptions import (
     QuiverConnectionError,
     QuiverValidationError,
-    FeatureViewNotFound,
-    FeatureNotFound,
-    ServerError,
-    TimeoutError,
+    QuiverFeatureViewNotFound,
+    QuiverFeatureNotFound,
+    QuiverServerError,
+    QuiverTimeoutError,
 )
-from .models import FeatureRequest, RequestContext, OutputOptions, FeatureViewInfo
+from .models import FeatureRequest, RequestContext, FeatureViewInfo
 from .table import FeatureTable
 
 logger = logging.getLogger(__name__)
@@ -57,7 +55,7 @@ class Client:
         max_retries: int = 3,
         compression: Optional[CompressionType] = None,
         default_null_strategy: NullStrategy = "fill_null",
-        validate_connection: bool = False,  # Default to False until proto integration
+        validate_connection: bool = False,
     ) -> None:
         # Validate inputs immediately
         if not isinstance(address, str) or not address.strip():
@@ -69,24 +67,17 @@ class Client:
         if max_retries < 0:
             raise QuiverValidationError("max_retries cannot be negative")
 
-        # Store configuration
-        self._address = self._normalize_address(address)
+        # Parse address into host and port
+        self._host, self._port = self._normalize_address(address)
         self._timeout = timeout
         self._max_retries = max_retries
         self._compression = compression
         self._default_null_strategy = default_null_strategy
         self._closed = False
 
-        # Initialize Flight client (but don't validate connection by default yet)
+        # Initialize Flight client
         try:
-            # Try different Flight Location API methods
-            if hasattr(flight.Location, "for_grpc_uri"):
-                location = flight.Location.for_grpc_uri(self._address)
-            else:
-                # Fallback for older PyArrow versions
-                location = flight.Location.for_grpc_tcp(
-                    self._address.replace("grpc://", "")
-                )
+            location = flight.Location.for_grpc_tcp(self._host, self._port)
             self._flight_client = flight.FlightClient(location)
         except Exception as e:
             # For development, create a mock client if Flight fails
@@ -97,25 +88,61 @@ class Client:
         if validate_connection and self._flight_client:
             self._validate_connection()
 
-    def _normalize_address(self, address: str) -> str:
-        """Normalize address to proper gRPC URI format."""
+    def _normalize_address(self, address: str) -> Tuple[str, int]:
+        """Parse address into host and port.
+
+        Args:
+            address: Address in various formats:
+                - "localhost:8815"
+                - "grpc://localhost:8815"
+                - "127.0.0.1:8815"
+                - "localhost" (defaults to port 8815)
+
+        Returns:
+            Tuple of (host, port)
+
+        Raises:
+            QuiverValidationError: If address format is invalid
+        """
         address = address.strip()
-        if not address.startswith(("grpc://", "grpc+tls://")):
-            # Default to grpc:// for local development
-            if "localhost" in address or "127.0.0.1" in address:
-                return f"grpc://{address}"
-            else:
-                return f"grpc+tls://{address}"
-        return address
+
+        # Remove protocol prefix if present
+        if address.startswith(("grpc://", "grpc+tls://")):
+            address = address.split("://", 1)[1]
+
+        # Parse host:port
+        if ":" in address:
+            host, port_str = address.rsplit(":", 1)
+            try:
+                port = int(port_str)
+                if not (1 <= port <= 65535):
+                    raise ValueError("Port out of range")
+            except ValueError as e:
+                raise QuiverValidationError(f"Invalid port in address '{address}': {e}")
+        else:
+            # Default to port 8815 for Quiver
+            host = address
+            port = 8815
+
+        if not host:
+            raise QuiverValidationError("Host cannot be empty")
+
+        return host, port
 
     def _validate_connection(self) -> None:
         """Validate connection to server by attempting to list flights."""
+        if not self._flight_client:
+            raise QuiverConnectionError(
+                "No Flight client available", f"{self._host}:{self._port}"
+            )
         try:
             list(self._flight_client.list_flights())
-            logger.info(f"Successfully connected to Quiver server at {self._address}")
+            logger.info(
+                f"Successfully connected to Quiver server at {self._host}:{self._port}"
+            )
         except Exception as e:
             raise QuiverConnectionError(
-                f"Failed to connect to server: {str(e)}", self._address
+                f"Failed to connect to server: {str(e)}", f"{self._host}:{self._port}"
             )
 
     def get_features(
@@ -152,11 +179,11 @@ class Client:
 
         Raises:
             QuiverValidationError: If inputs are invalid
-            FeatureViewNotFound: If feature view doesn't exist
-            FeatureNotFound: If features don't exist
+            QuiverFeatureViewNotFound: If feature view doesn't exist
+            QuiverFeatureNotFound: If features don't exist
             QuiverConnectionError: If connection fails
-            ServerError: If server error occurs
-            TimeoutError: If request times out
+            QuiverServerError: If server error occurs
+            QuiverTimeoutError: If request times out
         """
         if self._closed:
             raise QuiverValidationError("Client is closed")
@@ -334,7 +361,7 @@ class Client:
 
     def __repr__(self) -> str:
         status = "closed" if self._closed else "open"
-        return f"Client(address='{self._address}', timeout={self._timeout}, status='{status}')"
+        return f"Client(address='{self._host}:{self._port}', timeout={self._timeout}, status='{status}')"
 
 
 __all__ = ["Client"]

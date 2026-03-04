@@ -42,7 +42,6 @@ class FeatureRequest:
         if not self.features:
             raise QuiverValidationError("features cannot be empty")
 
-        # Check for duplicates
         if len(set(self.entities)) != len(self.entities):
             raise QuiverValidationError("entities must be unique")
 
@@ -86,7 +85,6 @@ class Entity:
     entity_id: str
 
 
-# Export all data classes
 __all__ = [
     "FeatureRequest",
     "RequestContext",
