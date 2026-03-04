@@ -226,7 +226,7 @@ async fn test_get_flight_info() {
     // The schema bytes should be in valid Arrow IPC format
     // This validates our SchemaAsIpc serialization is working correctly
     
-    println!("✅ F-01 get_flight_info implementation verified - returns proper FlightInfo structure");
+    println!("F-01 get_flight_info implementation verified - returns proper FlightInfo structure");
 
     let _ = tx.send(());
 }
