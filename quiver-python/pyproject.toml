@@ -1,16 +1,46 @@
 [project]
-name = "quiver-python"
+name = "quiver-client"
 version = "0.1.0"
 description = "Python client for Quiver gRPC server"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "grpcio-tools>=1.78.0",
     "pyarrow>=23.0.1",
 ]
+
+[project.optional-dependencies]
+pandas = [
+    "pandas>=1.5.0",
+]
+numpy = ["numpy>=1.21.0"]
+torch = [
+    "torch>=1.12.0",
+]
+tensorflow = ["tensorflow>=2.9.0"]
+polars = ["polars>=0.18.0"]
 
 [dependency-groups]
 dev = [
     "ruff>=0.4.0",
     "pytest>=7.0.0",
 ]
+
+[tool.ruff]
+# Exclude generated protobuf files and other auto-generated content
+exclude = [
+    "quiver/proto/",
+    "__pycache__/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".venv/",
+]
+
+[tool.ruff.lint]
+# Allow unused imports in try/except blocks for optional dependencies
+ignore = [
+    "F401",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"quiver/table.py" = ["F401"]
