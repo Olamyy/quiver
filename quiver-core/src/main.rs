@@ -1,4 +1,5 @@
 use arrow_flight::flight_service_server::FlightServiceServer;
+use clap::Parser;
 use quiver_core::adapters::memory::MemoryAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::config;
@@ -9,6 +10,13 @@ use std::sync::Arc;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    config: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -17,7 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let cfg = config::Config::load()?;
+    let args = Args::parse();
+    let cfg = config::Config::load(args.config.as_deref())?;
 
     if cfg.adapters.is_empty() {
         return Err("Configuration error: No adapters defined".into());
@@ -77,10 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     adapter as Arc<dyn quiver_core::adapters::BackendAdapter>,
                 );
             }
-            config::AdapterConfig::Redis { connection, .. } => {
-                let adapter = RedisAdapter::new(&connection)
-                    .await
-                    .expect("Failed to create Redis adapter");
+            config::AdapterConfig::Redis {
+                connection,
+                password,
+                key_template,
+            } => {
+                let adapter = RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
                 resolver.register_adapter(
                     name,
                     Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,
@@ -107,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r#"
    ____        _                
   / __ \__  __(_)   _____  _____
-/ / / / / / / / | | / _ \/ ___/
+ / / / / / / / / | | / _ \/ ___/
 / /_/ / /_/ / /| |_| /  __/ /    
 \___\_\__,_/_/ |____/\___/_/     
                                  
