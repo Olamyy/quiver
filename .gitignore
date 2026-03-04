@@ -216,4 +216,4 @@ test_env/*
 quiver-core/config.yaml
 *.py
 conf.yaml
-AGENTS.md
+AGENT.md
