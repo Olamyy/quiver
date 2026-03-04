@@ -210,7 +210,7 @@ class Client:
 
     def _execute_flight_request(
         self,
-        proto_request: serving_pb2.FeatureRequest, # noqa
+        proto_request: serving_pb2.FeatureRequest,  # noqa
         timeout: float,  # noqa
     ) -> FeatureTable:
         """Execute the Flight request with retry logic."""
@@ -229,18 +229,18 @@ class Client:
                 batches = []
                 schema = None
 
-                for batch_reader in flight_reader:
+                for batch in flight_reader:
                     if schema is None:
-                        schema = batch_reader.schema
-                    batches.extend(batch_reader.to_batches())
+                        schema = batch.data.schema
+                    batches.append(batch.data)
 
                     if time.time() - start_time > timeout:
                         raise QuiverTimeoutError(f"Request timed out after {timeout}s")
 
                 if batches:
-                    table = pa.Table.from_batches(batches, schema) # noqa
+                    table = pa.Table.from_batches(batches, schema)  # noqa
                 else:
-                    table = pa.Table.from_arrays([], schema or pa.schema([])) # noqa
+                    table = pa.Table.from_arrays([], schema or pa.schema([]))  # noqa
 
                 logger.debug(
                     f"Retrieved {table.num_rows} rows in {time.time() - start_time:.2f}s"
