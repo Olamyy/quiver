@@ -68,9 +68,64 @@ impl FlightService for QuiverFlightServer {
     }
     async fn get_flight_info(
         &self,
-        _request: Request<FlightDescriptor>,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+        let descriptor = request.into_inner();
+        let view_name = descriptor.path.first().ok_or_else(|| {
+            Status::invalid_argument("FlightDescriptor must contain a path for the feature view")
+        })?;
+
+        // Get feature view metadata
+        let metadata = self
+            .resolver
+            .get_view_metadata(view_name)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to resolve feature view: {}", e)))?;
+
+        // Get the Arrow schema 
+        let schema = self
+            .resolver
+            .get_arrow_schema(view_name)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to resolve schema: {}", e)))?;
+
+        // Serialize schema using Arrow Flight's SchemaAsIpc (same as get_schema)
+        let options = arrow::ipc::writer::IpcWriteOptions::default();
+        let schema_result: SchemaResult = arrow_flight::SchemaAsIpc::new(&schema, &options)
+            .try_into()
+            .map_err(|e| Status::internal(format!("Failed to serialize schema: {}", e)))?;
+
+        // Create flight endpoints - typically would include multiple endpoints for partitioned data
+        // For now, create a single endpoint pointing back to this server
+        let endpoint = arrow_flight::FlightEndpoint {
+            ticket: Some(Ticket {
+                ticket: descriptor.cmd.clone(), // Use the same descriptor command as ticket
+            }),
+            location: vec![], // Empty location means same server
+            expiration_time: None, // No expiration
+            app_metadata: vec![].into(), // No additional metadata
+        };
+
+        // Build FlightInfo response
+        let flight_info = FlightInfo {
+            schema: schema_result.schema,
+            flight_descriptor: Some(descriptor),
+            endpoint: vec![endpoint],
+            total_records: -1, // -1 indicates unknown (standard Arrow Flight convention)
+            total_bytes: -1,   // -1 indicates unknown
+            ordered: false,    // Results are not guaranteed to be ordered
+            app_metadata: format!(
+                "entity_type:{};schema_version:{};backends:{}", 
+                metadata.entity_type,
+                metadata.schema_version,
+                metadata.backend_routing.iter()
+                    .map(|(k, v)| format!("{}:{}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ).into_bytes().into(),
+        };
+
+        Ok(Response::new(flight_info))
     }
     async fn poll_flight_info(
         &self,
