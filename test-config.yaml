@@ -1,0 +1,24 @@
+server:
+  port: 8815
+  host: "127.0.0.1"
+
+registry:
+  type: static
+  views:
+    - name: "user_features"
+      entity_type: "user"
+      entity_key: "user_id"
+      columns:
+        - name: "entity_id"
+          arrow_type: "string"
+          nullable: false
+          source: "memory"
+        - name: "score"
+          arrow_type: "float64"
+          nullable: true
+          source: "memory"
+      schema_version: 1
+
+adapters:
+  memory:
+    type: memory

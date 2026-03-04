@@ -51,16 +51,17 @@ impl FlightService for QuiverFlightServer {
             .map_err(|e| Status::internal(format!("Failed to list views: {}", e)))?;
 
         let flights = views.into_iter().map(|name| FlightInfo {
-            schema: prost::bytes::Bytes::new(), // Corrected Type
+            schema: prost::bytes::Bytes::new(), // Empty schema in list_flights
             flight_descriptor: Some(FlightDescriptor {
+                r#type: arrow_flight::flight_descriptor::DescriptorType::Path as i32,
                 path: vec![name],
-                ..Default::default()
+                cmd: prost::bytes::Bytes::new(),
             }),
             endpoint: vec![],
             total_records: -1,
             total_bytes: -1,
             ordered: false,
-            app_metadata: vec![].into(), // Corrected Type
+            app_metadata: vec![].into(),
         });
 
         let stream = futures::stream::iter(flights.map(Ok));
