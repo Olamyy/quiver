@@ -84,7 +84,7 @@ proto-gen: .protoc
 
 .PHONY: proto-check
 proto-check: .protoc 
-	protoc --proto_path=proto --descriptor_set_out=/dev/null proto/v1/*.proto
+	cd proto/v1 && protoc --descriptor_set_out=/dev/null *.proto
 
 .PHONY: build
 build: .protoc 
