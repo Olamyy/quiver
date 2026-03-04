@@ -41,7 +41,7 @@ class QuiverBenchmarkClient:
                 return False
             views = self.client.list_feature_views()
             return True
-        except Exception:
+        except Exception: # noqa
             return False
 
     async def close(self):

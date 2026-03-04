@@ -23,7 +23,7 @@ async fn test_ingestion_retrieval_loop() {
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
-    let service = QuiverFlightServer::new(resolver.clone());
+    let service = QuiverFlightServer::new(resolver.clone(), None);
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(addr).unwrap();
@@ -156,7 +156,7 @@ async fn test_get_flight_info() {
         schema_version: 1,
     });
 
-    let service = QuiverFlightServer::new(resolver.clone());
+    let service = QuiverFlightServer::new(resolver.clone(), None);
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(addr).unwrap();

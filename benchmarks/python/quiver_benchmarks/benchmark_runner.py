@@ -54,11 +54,10 @@ class BenchmarkRunner:
         failures = []
         methods = self.config.methods or []
 
-        # Check Redis connection for all Redis-based methods
         redis_methods = {
             BenchmarkMethod.DIRECT_REDIS_BINARY,
             BenchmarkMethod.DIRECT_REDIS_JSON,
-            BenchmarkMethod.QUIVER_CLIENT,  # Quiver also needs Redis backend
+            BenchmarkMethod.QUIVER_CLIENT,
         }
 
         if any(method in redis_methods for method in methods):
@@ -72,7 +71,7 @@ class BenchmarkRunner:
                     socket_timeout=2,
                     decode_responses=False,
                 )
-                result = await client.ping()
+                _ = await client.ping()
                 await client.aclose()
                 console.print(
                     f"✓ Redis connection successful at {self.config.redis_host}:{self.config.redis_port}",
@@ -83,13 +82,11 @@ class BenchmarkRunner:
                     f"Redis connection failed at {self.config.redis_host}:{self.config.redis_port}: {e}"
                 )
 
-        # Check Quiver server connection
         if BenchmarkMethod.QUIVER_CLIENT in methods:
             try:
                 if not QUIVER_AVAILABLE:
                     raise Exception("Quiver client package not available")
 
-                # Test actual gRPC connection to Quiver server
                 import grpc
 
                 channel = grpc.aio.insecure_channel(
@@ -112,7 +109,6 @@ class BenchmarkRunner:
                     f"Quiver server connection failed at {self.config.quiver_host}:{self.config.quiver_port}: {e}"
                 )
 
-        # Check HTTP server connection
         if BenchmarkMethod.HTTP_API in methods:
             try:
                 import httpx
@@ -134,9 +130,8 @@ class BenchmarkRunner:
                     f"HTTP server connection failed at {self.config.http_host}:{self.config.http_port}: {e}"
                 )
 
-        # Fail hard if any infrastructure is unavailable
         if failures:
-            console.print("\n❌ Infrastructure validation failed:", style="red bold")
+            console.print("\nInfrastructure validation failed:", style="red bold")
             for failure in failures:
                 console.print(f"  • {failure}", style="red")
             console.print("\nPlease start required services:", style="yellow")
@@ -154,7 +149,6 @@ class BenchmarkRunner:
         start_time = time.time()
 
         try:
-            # Connect to Redis for data setup
             import redis.asyncio as redis
 
             client = redis.Redis(
@@ -163,10 +157,8 @@ class BenchmarkRunner:
                 decode_responses=False,
             )
 
-            # Generate and store test data
             pipe = client.pipeline()
 
-            # Generate realistic feature data
             feature_names = [
                 f"feature_{i}" for i in range(self.config.features_per_request)
             ]
@@ -186,25 +178,18 @@ class BenchmarkRunner:
 
                 for entity_id in entity_ids:
                     for feature_name in feature_names:
-                        # Generate random feature value
                         value = random.uniform(-10.0, 10.0)
-
-                        # Store in binary format (for Quiver/binary client)
                         binary_key = f"quiver:f:{feature_name}:e:{entity_id}"
-                        pipe.set(binary_key, struct.pack("d", value))
-
-                        # Store in JSON format (for JSON client and HTTP API)
+                        pipe.set(binary_key, str(value))
                         json_key = f"feature:{feature_name}:entity:{entity_id}"
                         pipe.set(json_key, json.dumps(value))
 
                         progress.advance(task, 1)
 
-                        # Execute pipeline in batches to avoid memory issues
                         if len(pipe.command_stack) >= 1000:
                             await pipe.execute()
                             pipe = client.pipeline()
 
-                # Execute remaining commands
                 if len(pipe.command_stack) > 0:
                     await pipe.execute()
 
@@ -222,7 +207,6 @@ class BenchmarkRunner:
 
     def generate_request_entities(self) -> List[str]:
         """Generate entity IDs for a single request"""
-        # For realistic testing, select a subset of entities per request
         entities_per_request = min(10, self.config.num_entities)
         max_entity_id = self.config.num_entities - 1
 
@@ -239,7 +223,6 @@ class BenchmarkRunner:
         """Run benchmark for a specific method"""
         console.print(f"Benchmarking {method.value}...", style="blue")
 
-        # Generate test entities and features
         entity_ids = self.generate_request_entities()
         feature_names = self.generate_request_features()
 
@@ -247,7 +230,6 @@ class BenchmarkRunner:
         data_points = []
 
         try:
-            # Initialize client based on method
             if method == BenchmarkMethod.DIRECT_REDIS_BINARY:
                 client = DirectRedisBinaryClient(
                     self.config.redis_host, self.config.redis_port
@@ -290,20 +272,18 @@ class BenchmarkRunner:
                     client, entity_ids, feature_names, self.config.duration_seconds
                 )
 
-            # Calculate metrics from data points
             return self.calculate_metrics(method, data_points)
 
         finally:
-            # Cleanup client
             if client and hasattr(client, "close"):
                 await client.close()
 
+    @staticmethod
     def calculate_metrics(
-        self, method: BenchmarkMethod, data_points: List[DataPoint]
+        method: BenchmarkMethod, data_points: List[DataPoint]
     ) -> PerformanceMetrics:
         """Calculate performance metrics from data points"""
         if not data_points:
-            # Return empty metrics if no data
             return PerformanceMetrics(
                 method=method,
                 total_requests=0,
@@ -325,12 +305,10 @@ class BenchmarkRunner:
                 error_types={},
             )
 
-        # Basic counts
         total_requests = len(data_points)
         successful_requests = sum(1 for dp in data_points if dp.success)
         failed_requests = total_requests - successful_requests
 
-        # Latency calculations
         latencies = [dp.latency_ms for dp in data_points]
         latencies.sort()
 
@@ -338,7 +316,6 @@ class BenchmarkRunner:
         min_latency = min(latencies)
         max_latency = max(latencies)
 
-        # Percentiles
         def percentile(data: List[float], p: float) -> float:
             if not data:
                 return 0.0
@@ -349,7 +326,6 @@ class BenchmarkRunner:
         p95_latency = percentile(latencies, 95)
         p99_latency = percentile(latencies, 99)
 
-        # Throughput calculation
         if data_points:
             duration = data_points[-1].timestamp - data_points[0].timestamp
             throughput = successful_requests / duration if duration > 0 else 0
@@ -357,12 +333,10 @@ class BenchmarkRunner:
             duration = 0
             throughput = 0
 
-        # Success rate
         success_rate = (
             (successful_requests / total_requests) * 100 if total_requests > 0 else 0
         )
 
-        # Error analysis
         error_types = {}
         for dp in data_points:
             if not dp.success and dp.error_type:
@@ -394,18 +368,14 @@ class BenchmarkRunner:
         console.print("Starting Quiver Python Benchmark Suite", style="bold blue")
         console.print()
 
-        # Print environment information
         print_environment_info(self.environment)
 
         start_time = time.time()
 
-        # Validate infrastructure first
         await self.validate_infrastructure()
 
-        # Setup test data
         data_setup_time = await self.setup_test_data()
 
-        # Run benchmarks
         metrics = {}
 
         for method in self.config.methods or []:
@@ -419,7 +389,6 @@ class BenchmarkRunner:
 
         total_duration = time.time() - start_time
 
-        # Create results
         results = BenchmarkResults(
             config=self.config,
             environment=self.environment,
@@ -431,7 +400,8 @@ class BenchmarkRunner:
 
         return results
 
-    def print_method_results(self, metrics: PerformanceMetrics):
+    @staticmethod
+    def print_method_results(metrics: PerformanceMetrics):
         """Print results for a single method"""
         table = Table(title=f"Results: {metrics.method.value}")
         table.add_column("Metric", style="cyan")
@@ -467,7 +437,6 @@ def run(
 ):
     """Run benchmark suite"""
 
-    # Get configuration
     if scenario in SCENARIOS:
         config = SCENARIOS[scenario]
     else:
@@ -475,11 +444,9 @@ def run(
         console.print(f"Available scenarios: {list(SCENARIOS.keys())}")
         return
 
-    # Override duration if specified
     if duration:
         config.duration_seconds = duration
 
-    # Override methods if specified
     if methods:
         try:
             method_list = [BenchmarkMethod(m.strip()) for m in methods.split(",")]
@@ -488,16 +455,13 @@ def run(
             console.print(f"Invalid method: {e}", style="red")
             return
 
-    # Run benchmarks
     async def run_benchmarks():
         runner = BenchmarkRunner(config)
         results = await runner.run_all_benchmarks()
 
-        # Print comparison table
         if len(results.metrics) > 1:
             print_comparison_table(results)
 
-        # Save results if requested
         if output:
             save_results(results, output)
 
@@ -530,10 +494,8 @@ def print_comparison_table(results: BenchmarkResults):
 def save_results(results: BenchmarkResults, output_path: str):
     """Save benchmark results to file"""
     try:
-        # Create results directory if needed
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert to JSON-serializable format
         data = {
             "timestamp": results.timestamp.isoformat(),
             "config": {
