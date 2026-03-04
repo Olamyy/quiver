@@ -118,7 +118,32 @@ Quiver is in early development. The core Arrow flight server is complete. The se
 - [Protobuf Compiler](https://grpc.io/docs/protoc-installation/) (`brew install protobuf` on Mac)
 - [grpcurl](https://github.com/fullstorydev/grpcurl) (for manual testing)
 
-### Run the Server
+### Quick Start
+
+1. **Clone and build**:
+   ```bash
+   git clone <repository-url>
+   cd quiver
+   make  # Runs quality checks and tests
+   ```
+
+2. **Create configuration** (see [Configuration](#configuration) section below)
+
+3. **Start the server**:
+   ```bash
+   make run
+   # Or use cargo directly:
+   # cd quiver-core && cargo run
+   ```
+
+4. **Verify it's working**:
+   ```bash
+   # Check server health
+   grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
+   
+   # List available services
+   grpcurl -plaintext localhost:8815 list
+   ```
 
 ### Configuration
 
@@ -135,7 +160,7 @@ Quiver uses a layered configuration system. Settings are resolved in the followi
 
 ```yaml
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8815
 
 registry:
@@ -143,10 +168,15 @@ registry:
   views:
     - name: "user_features"
       entity_type: "user"
-      entity_key: "entity_id"
+      entity_key: "user_id"
       columns:
-        - name: "spend_30d"
+        - name: "entity_id"
+          arrow_type: "string"
+          nullable: false
+          source: "memory"
+        - name: "score"
           arrow_type: "float64"
+          nullable: true
           source: "memory"
 
 adapters:
@@ -154,13 +184,18 @@ adapters:
     type: memory
 ```
 
-Once the config file is ready, you can run the server:
+Once the config file is ready, start the server:
 
 ```bash
-cd quiver-core
-cargo run
+make run
 ```
-The server starts on `0.0.0.0:8815` by default.
+
+The server starts on `127.0.0.1:8815` and should display:
+```
+INFO Quiver server starting on 127.0.0.1:8815
+INFO Loaded 1 feature view: user_features
+INFO Server ready for connections
+```
 
 ---
 
@@ -174,9 +209,9 @@ grpcurl -plaintext localhost:8815 list
 ```
 
 ### Fetch a Schema
-Retrieve the Arrow schema for the pre-seeded `my_feature_view`:
+Retrieve the Arrow schema for the `user_features` view:
 ```bash
-grpcurl -plaintext -d '{"path": ["my_feature_view"]}' \
+grpcurl -plaintext -d '{"path": ["user_features"]}' \
   localhost:8815 arrow.flight.protocol.FlightService/GetSchema
 ```
 
@@ -189,25 +224,68 @@ grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
 
 ## Python Client
 
-Quiver provides a Python client that wraps `pyarrow.flight` to handle Protobuf serialization and tensor conversion.
+Quiver includes a high-performance Python client with zero-copy Arrow integration, ML framework exports (pandas, PyTorch, TensorFlow, Polars), and comprehensive error handling.
 
+**[📖 See Python Client Documentation](quiver-python/README.md)**
+
+Quick example:
 ```python
-from quiver import QuiverClient
+import quiver
 
-client = QuiverClient("grpc://localhost:8815")
-
-# Fetch features for multiple entities in one call
+client = quiver.Client("localhost:8815")
 features = client.get_features(
-    view="transaction_features",
-    entities=[{"user_id": "123"}, {"merchant_id": "456"}],
-    max_staleness=60
+    feature_view="user_features",
+    entities=["user_123", "user_456"],
+    features=["entity_id", "score"]
 )
-
-# Zero-copy handover to PyTorch
-X = features.to_tensor() 
-model = ...
-model.predict(X)
+df = features.to_pandas()
+client.close()
 ```
+
+---
+
+## Development
+
+### Build System
+
+Quiver uses `make` for all development tasks:
+
+```bash
+# Main workflow - format, lint, and test everything
+make
+
+# Individual tasks
+make build          # Build Rust components
+make test-rs        # Run Rust tests only
+make pytest         # Run Python tests only
+make quality        # Format and lint all code
+make run            # Start the development server
+```
+
+### Project Structure
+
+```
+quiver/
+├── quiver-core/         # Rust server implementation
+├── quiver-python/       # Python client library
+├── proto/v1/           # Protocol buffer definitions
+├── conf.yaml           # Example configuration
+└── Makefile           # Build automation
+```
+
+### Testing
+
+The project includes comprehensive test coverage:
+- **Unit tests**: Core logic and adapter functionality
+- **Integration tests**: End-to-end server behavior
+- **Python client tests**: Client library functionality
+
+Run all tests with:
+```bash
+make test
+```
+
+---
 
 ## Roadmap
 
