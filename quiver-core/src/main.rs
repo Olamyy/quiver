@@ -1,19 +1,21 @@
-use crate::adapters::memory::MemoryAdapter;
-use crate::registry::StaticRegistry;
-use crate::resolver::Resolver;
-use crate::server::QuiverFlightServer;
 use arrow_flight::flight_service_server::FlightServiceServer;
+use clap::Parser;
+use quiver_core::adapters::memory::MemoryAdapter;
+use quiver_core::adapters::redis::RedisAdapter;
+use quiver_core::config;
+use quiver_core::registry::StaticRegistry;
+use quiver_core::resolver::Resolver;
+use quiver_core::server::QuiverFlightServer;
 use std::sync::Arc;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-pub mod adapters;
-pub mod config;
-pub mod demo;
-pub mod proto;
-pub mod registry;
-pub mod resolver;
-pub mod server;
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    config: Option<String>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,7 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let cfg = config::Config::load()?;
+    let args = Args::parse();
+    let cfg = config::Config::load(args.config.as_deref())?;
 
     if cfg.adapters.is_empty() {
         return Err("Configuration error: No adapters defined".into());
@@ -52,14 +55,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             backend_routing.insert(col.name.clone(), col.source.clone());
         }
 
-        registry.register(crate::proto::quiver::v1::FeatureViewMetadata {
+        registry.register(quiver_core::proto::quiver::v1::FeatureViewMetadata {
             name: view.name,
             entity_type: view.entity_type,
             entity_key: view.entity_key,
             columns: view
                 .columns
                 .into_iter()
-                .map(|c| crate::proto::quiver::v1::FeatureColumnSchema {
+                .map(|c| quiver_core::proto::quiver::v1::FeatureColumnSchema {
                     name: c.name,
                     arrow_type: c.arrow_type,
                     nullable: c.nullable,
@@ -71,20 +74,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let resolver = Arc::new(Resolver::new(
-        registry.clone() as Arc<dyn crate::registry::Registry>
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>
     ));
 
     for (name, adapter_cfg) in cfg.adapters {
         match adapter_cfg {
             config::AdapterConfig::Memory => {
                 let adapter = Arc::new(MemoryAdapter::new());
-                resolver
-                    .register_adapter(name, adapter as Arc<dyn crate::adapters::BackendAdapter>);
+                resolver.register_adapter(
+                    name,
+                    adapter as Arc<dyn quiver_core::adapters::BackendAdapter>,
+                );
             }
-            config::AdapterConfig::Redis { .. } => {
-                tracing::warn!(
-                    "Redis adapter configured for '{}' but not yet implemented",
-                    name
+            config::AdapterConfig::Redis {
+                connection,
+                password,
+                key_template,
+            } => {
+                let adapter =
+                    RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
+                resolver.register_adapter(
+                    name,
+                    Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,
                 );
             }
         }

@@ -263,7 +263,6 @@ fn build_record_batch(
     let mut fields: Vec<Field> = Vec::with_capacity(feature_names.len() + 1);
     let mut columns: Vec<ArrayRef> = Vec::with_capacity(feature_names.len() + 1);
 
-    // entity_id — always non-null.
     fields.push(Field::new("entity_id", DataType::Utf8, false));
     let mut id_builder = StringBuilder::new();
     for eid in entity_ids {
@@ -271,7 +270,6 @@ fn build_record_batch(
     }
     columns.push(Arc::new(id_builder.finish()) as ArrayRef);
 
-    // Feature columns.
     for (feat_idx, feat_name) in feature_names.iter().enumerate() {
         let values = &resolved[feat_idx];
 
@@ -443,8 +441,8 @@ mod tests {
             .downcast_ref::<Int64Array>()
             .unwrap();
 
-        assert_eq!(spend.value(0), 890.0); // latest write for user:101
-        assert_eq!(sessions.value(0), 23); // latest write for user:101
+        assert_eq!(spend.value(0), 890.0);
+        assert_eq!(sessions.value(0), 23);
         assert_eq!(spend.value(1), 120.0);
         assert_eq!(sessions.value(1), 4);
     }
@@ -480,9 +478,6 @@ mod tests {
     async fn test_per_feature_temporal_resolution() {
         let adapter = make_adapter();
 
-        // as_of 10 days ago:
-        //   spend_30d  — 7-day write (890.0) is in the future → use 30-day (450.0)
-        //   session_count — 3-day write (23) is in the future → use 30-day (8)
         let batch = adapter
             .get(
                 &["user:101".to_string()],

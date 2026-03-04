@@ -214,3 +214,6 @@ test_env/*
 *-rfc*.md
 *.rlib
 quiver-core/config.yaml
+*.py
+conf.yaml
+AGENTS.md

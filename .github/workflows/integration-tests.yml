@@ -3,8 +3,20 @@ name: Integration Tests
 on:
   push:
     branches: [main, develop]
+    paths:
+      - "quiver-core/**"
+      - "quiver-python/**"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/integration-tests.yml"
   pull_request:
     branches: [main, develop]
+    paths:
+      - "quiver-core/**"
+      - "quiver-python/**"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/integration-tests.yml"
 
 jobs:
   integration-test:
@@ -38,9 +50,11 @@ jobs:
             quiver-core/target
           key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install Python dependencies
+        run: make install-py
+
       - name: Build Rust server
-        working-directory: ./quiver-core
-        run: cargo build --release
+        run: make build-release
 
       - name: Start Quiver server
         working-directory: ./quiver-core
@@ -48,15 +62,6 @@ jobs:
           ./target/release/quiver-core &
           echo $! > /tmp/quiver.pid
           sleep 5
-
-      - name: Install Python client
-        working-directory: ./quiver-python
-        run: uv pip install --system -e .
-
-      - name: Test Python client
-        working-directory: ./quiver-python
-        run: |
-          python -c "from client import QuiverClient; print('Python client import successful')"
 
       - name: Stop Quiver server
         if: always()

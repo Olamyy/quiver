@@ -1,0 +1,112 @@
+name: Main CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "quiver-core/**"
+      - "quiver-python/**"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/main-ci.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "quiver-core/**"
+      - "quiver-python/**"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/main-ci.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  main:
+    name: Main Quality & Test Pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache target directory
+        uses: actions/cache@v5
+        with:
+          path: quiver-core/target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/uv
+            quiver-python/.venv
+          key: ${{ runner.os }}-python-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-python-
+
+      - name: Run main quality and test pipeline
+        run: make main
+
+  # This job can serve as a quick feedback for basic checks
+  quick-check:
+    name: Quick Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            quiver-core/target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Quick check
+        run: make check

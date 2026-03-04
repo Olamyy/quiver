@@ -79,19 +79,37 @@ pub enum AdapterConfig {
     Redis {
         connection: String,
         password: Option<String>,
+        #[serde(default = "default_redis_template")]
+        key_template: String,
     },
 }
 
+fn default_redis_template() -> String {
+    "quiver:f:{feature}:e:{entity}".to_string()
+}
+
 impl Config {
-    pub fn load() -> Result<Self, config::ConfigError> {
-        let s = config::Config::builder()
+    pub fn load(config_path: Option<&str>) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut builder = config::Config::builder()
             .set_default("server.host", "0.0.0.0")?
-            .set_default("server.port", 8815)?
-            .add_source(config::File::with_name("config").required(true))
+            .set_default("server.port", 8815)?;
+
+        if let Some(path) = config_path {
+            let path_buf = std::path::PathBuf::from(path);
+            if !path_buf.exists() {
+                return Err(format!("Configuration file not found: {}", path).into());
+            }
+            builder = builder.add_source(config::File::from(path_buf).required(true));
+        } else {
+            // Default search path: look for config.yaml, config.json etc. in the current directory
+            builder = builder.add_source(config::File::with_name("config").required(false));
+        }
+
+        let s = builder
             .add_source(config::Environment::with_prefix("QUIVER").separator("__"))
             .build()?;
 
-        s.try_deserialize()
+        Ok(s.try_deserialize()?)
     }
 }
 
