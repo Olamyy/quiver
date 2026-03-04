@@ -6,7 +6,6 @@ import logging
 
 import pyarrow as pa
 import pyarrow.flight as flight
-from google.protobuf.timestamp_pb2 import Timestamp
 
 from ._types import (
     EntityId,
@@ -25,7 +24,6 @@ from .exceptions import (
 )
 from .models import FeatureRequest, RequestContext, FeatureViewInfo
 from .table import FeatureTable
-from .proto import serving_pb2, types_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +56,18 @@ class Client:
         compression: Optional[CompressionType] = None,
         default_null_strategy: NullStrategy = "fill_null",
         validate_connection: bool = False,
-        use_server: bool = False,  # Default to mock mode for development
     ) -> None:
+        # Validate inputs immediately
+        if not isinstance(address, str) or not address.strip():
+            raise QuiverValidationError("address cannot be empty")
+
+        if timeout <= 0:
+            raise QuiverValidationError("timeout must be positive")
+
+        if max_retries < 0:
+            raise QuiverValidationError("max_retries cannot be negative")
+
+        # Parse address into host and port
         self._host, self._port = self._normalize_address(address)
         self._timeout = timeout
         self._max_retries = max_retries
@@ -67,34 +75,57 @@ class Client:
         self._default_null_strategy = default_null_strategy
         self._closed = False
 
-        # Initialize Flight client only if use_server is True
-        if use_server:
-            try:
-                location = flight.Location.for_grpc_tcp(self._host, self._port)
-                self._flight_client = flight.FlightClient(location)
-            except Exception:
-                self._flight_client = None
-        else:
-            # Use mock mode by default for development and testing
+        # Initialize Flight client
+        try:
+            location = flight.Location.for_grpc_tcp(self._host, self._port)
+            self._flight_client = flight.FlightClient(location)
+        except Exception as e:
+            # For development, create a mock client if Flight fails
+            logger.warning(f"Flight client creation failed: {e}. Using mock mode.")
             self._flight_client = None
 
+        # Validate connection if requested
         if validate_connection and self._flight_client:
             self._validate_connection()
 
-    @staticmethod
-    def _normalize_address(address: str) -> Tuple[str, int]:
-        """Parse address into host and port."""
+    def _normalize_address(self, address: str) -> Tuple[str, int]:
+        """Parse address into host and port.
+
+        Args:
+            address: Address in various formats:
+                - "localhost:8815"
+                - "grpc://localhost:8815"
+                - "127.0.0.1:8815"
+                - "localhost" (defaults to port 8815)
+
+        Returns:
+            Tuple of (host, port)
+
+        Raises:
+            QuiverValidationError: If address format is invalid
+        """
         address = address.strip()
 
+        # Remove protocol prefix if present
         if address.startswith(("grpc://", "grpc+tls://")):
             address = address.split("://", 1)[1]
 
+        # Parse host:port
         if ":" in address:
             host, port_str = address.rsplit(":", 1)
-            port = int(port_str)
+            try:
+                port = int(port_str)
+                if not (1 <= port <= 65535):
+                    raise ValueError("Port out of range")
+            except ValueError as e:
+                raise QuiverValidationError(f"Invalid port in address '{address}': {e}")
         else:
+            # Default to port 8815 for Quiver
             host = address
             port = 8815
+
+        if not host:
+            raise QuiverValidationError("Host cannot be empty")
 
         return host, port
 
@@ -171,149 +202,9 @@ class Client:
 
         effective_timeout = timeout or self._timeout
 
-        # Build protobuf request and execute via Flight
-        proto_request = self._build_proto_request(
-            request, include_timestamps, include_freshness, context
-        )
-        return self._execute_flight_request(proto_request, effective_timeout)
-
-    def _build_proto_request(
-        self,
-        request: FeatureRequest,
-        include_timestamps: bool,
-        include_freshness: bool,
-        context: Optional[RequestContext],
-    ) -> serving_pb2.FeatureRequest:
-        """Build protobuf FeatureRequest from Python request."""
-        proto_request = serving_pb2.FeatureRequest()
-        proto_request.feature_view = request.feature_view
-        proto_request.feature_names.extend(request.features)
-
-        # Convert entities to EntityKey protos
-        for entity_id in request.entities:
-            entity_key = types_pb2.EntityKey()
-            entity_key.entity_type = (
-                "default"  # For now, assume all entities are default type
-            )
-            entity_key.entity_id = entity_id
-            proto_request.entities.append(entity_key)
-
-        # Convert as_of datetime to protobuf Timestamp
-        if request.as_of:
-            timestamp = Timestamp()
-            timestamp.FromDatetime(request.as_of)
-            proto_request.as_of.CopyFrom(timestamp)
-
-        # Build output options
-        output_options = serving_pb2.OutputOptions()
-        output_options.include_timestamps = include_timestamps
-        output_options.include_freshness = include_freshness
-        output_options.null_strategy = request.null_strategy or "fill_null"
-        proto_request.output.CopyFrom(output_options)
-
-        # Add request context if provided
-        if context:
-            context_proto = types_pb2.RequestContext()
-            context_proto.request_id = context.request_id or ""
-            context_proto.caller = context.caller or ""
-            context_proto.environment = context.environment or ""
-            proto_request.context.CopyFrom(context_proto)
-
-        return proto_request
-
-    def _execute_flight_request(
-        self, proto_request: serving_pb2.FeatureRequest, timeout: float
-    ) -> FeatureTable:
-        """Execute the Flight request with retry logic."""
-        if not self._flight_client:
-            # Fall back to mock mode if no Flight client
-            logger.info("No Flight client available, using mock response")
-            return self._create_mock_response_from_proto(proto_request)
-
-        last_exception = None
-        for attempt in range(self._max_retries + 1):
-            try:
-                # Serialize protobuf request as Flight ticket
-                ticket_data = proto_request.SerializeToString()
-                ticket = flight.Ticket(ticket_data)
-
-                # Execute Flight do_get request
-                start_time = time.time()
-                flight_reader = self._flight_client.do_get(ticket)
-
-                # Read all batches from the stream
-                batches = []
-                schema = None
-
-                for batch_reader in flight_reader:
-                    if schema is None:
-                        schema = batch_reader.schema
-                    batches.extend(batch_reader.to_batches())
-
-                    # Check timeout
-                    if time.time() - start_time > timeout:
-                        raise QuiverTimeoutError(f"Request timed out after {timeout}s")
-
-                # Combine batches into table
-                if batches:
-                    table = pa.Table.from_batches(batches, schema)
-                else:
-                    # Empty result - create empty table with proper schema
-                    table = pa.Table.from_arrays([], schema or pa.schema([]))
-
-                logger.debug(
-                    f"Retrieved {table.num_rows} rows in {time.time() - start_time:.2f}s"
-                )
-                return FeatureTable(table)
-
-            except flight.FlightUnavailableError as e:
-                last_exception = QuiverConnectionError(
-                    f"Server unavailable: {str(e)}", f"{self._host}:{self._port}"
-                )
-            except flight.FlightError as e:
-                # Handle general Flight errors - could be not found or invalid argument
-                error_msg = str(e).lower()
-                if "not found" in error_msg or proto_request.feature_view in error_msg:
-                    raise QuiverFeatureViewNotFound(proto_request.feature_view)
-                elif "feature" in error_msg:
-                    raise QuiverFeatureNotFound(list(proto_request.feature_names))
-                else:
-                    raise QuiverValidationError(f"Invalid request: {str(e)}")
-            except flight.FlightTimedOutError as e:
-                raise QuiverTimeoutError(f"Request timed out: {str(e)}")
-            except Exception as e:
-                last_exception = QuiverServerError(f"Unexpected error: {str(e)}")
-
-            # Wait before retry with exponential backoff
-            if attempt < self._max_retries:
-                wait_time = min(2.0**attempt, 10.0)
-                time.sleep(wait_time)
-                logger.warning(
-                    f"Request failed, retrying in {wait_time}s (attempt {attempt + 1}/{self._max_retries + 1})"
-                )
-
-        # All retries exhausted
-        raise last_exception or QuiverServerError("Request failed after all retries")
-
-    def _create_mock_response_from_proto(
-        self, proto_request: serving_pb2.FeatureRequest
-    ) -> FeatureTable:
-        """Create mock response from protobuf request for fallback mode."""
-        entities = [entity.entity_id for entity in proto_request.entities]
-        features = list(proto_request.feature_names)
-        include_timestamps = proto_request.output.include_timestamps
-        include_freshness = proto_request.output.include_freshness
-
-        # Reuse existing mock response logic
-        mock_request = FeatureRequest(
-            feature_view=proto_request.feature_view,
-            entities=entities,
-            features=features,
-            null_strategy=cast(NullStrategy, proto_request.output.null_strategy),
-        )
-
+        # TODO: Replace with actual Flight/proto implementation
         return self._create_mock_response(
-            mock_request, include_timestamps, include_freshness
+            request, include_timestamps, include_freshness
         )
 
     def _create_mock_response(
