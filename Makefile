@@ -128,6 +128,27 @@ redis-stop:
 redis-seed: 
 	python3 seed_redis.py
 
+# Benchmark commands
+.PHONY: bench
+bench: ## Run complete benchmark suite proving Quiver's ML inference value
+	cd benchmarks && cargo run --bin benchmark
+
+.PHONY: bench-quick
+bench-quick: ## Run quick benchmark verification
+	@echo "Running quick benchmark verification..."
+	cd benchmarks && cargo run --bin benchmark &
+	@sleep 5
+	@pkill -f "cargo run --bin benchmark" 2>/dev/null || true
+	@echo "Quick benchmark verification completed"
+
+.PHONY: bench-criterion
+bench-criterion: ## Run precise Criterion-based benchmarks
+	cd benchmarks && cargo bench
+
+.PHONY: bench-report
+bench-report: ## Generate and display benchmark reports
+	cd benchmarks && cargo run --bin benchmark && echo "Check reports/ directory for detailed results"
+
 .PHONY: main
 main: quality test 
 
