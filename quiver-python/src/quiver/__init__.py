@@ -2,7 +2,13 @@
 
 from .client import Client
 from .table import FeatureTable
-from .models import FeatureRequest
+from .models import (
+    FeatureRequest,
+    RequestContext,
+    OutputOptions,
+    FeatureViewInfo,
+    Entity,
+)
 from .exceptions import (
     QuiverError,
     QuiverConnectionError,
@@ -22,6 +28,10 @@ __all__ = [
     "Client",
     "FeatureTable",
     "FeatureRequest",
+    "RequestContext",
+    "OutputOptions",
+    "FeatureViewInfo",
+    "Entity",
     "QuiverError",
     "QuiverConnectionError",
     "QuiverValidationError",
