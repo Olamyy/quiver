@@ -22,11 +22,9 @@ impl RedisAdapter {
     pub async fn new(url: &str, password: Option<&str>, key_template: &str) -> Result<Self, AdapterError> {
         let connection_url = if let Some(pass) = password {
             // Simple URL construction with password - assumes redis://host:port format
-            if url.starts_with("redis://") {
-                let without_scheme = &url[8..]; // Remove "redis://"
+            if let Some(without_scheme) = url.strip_prefix("redis://") {
                 format!("redis://:{pass}@{without_scheme}")
-            } else if url.starts_with("rediss://") {
-                let without_scheme = &url[9..]; // Remove "rediss://"
+            } else if let Some(without_scheme) = url.strip_prefix("rediss://") {
                 format!("rediss://:{pass}@{without_scheme}")
             } else {
                 url.to_string() // Use as-is if format is unexpected

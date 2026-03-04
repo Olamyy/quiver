@@ -194,19 +194,16 @@ async fn test_get_flight_info() {
     let flight_info_response = client.get_flight_info(descriptor).await.unwrap();
     let flight_info = flight_info_response.into_inner();
 
-    // Verify the response structure matches F-01 specification
     assert!(!flight_info.schema.is_empty(), "Schema should not be empty");
     assert_eq!(flight_info.endpoint.len(), 1, "Should have one endpoint");
     assert_eq!(flight_info.total_records, -1, "Total records should be unknown (-1) per F-01");
     assert_eq!(flight_info.total_bytes, -1, "Total bytes should be unknown (-1) per F-01");
     assert_eq!(flight_info.ordered, false, "Results should not be ordered per F-01");
     
-    // Verify flight descriptor is preserved
     assert!(flight_info.flight_descriptor.is_some(), "Flight descriptor should be preserved");
     let returned_descriptor = flight_info.flight_descriptor.unwrap();
     assert_eq!(returned_descriptor.path, vec!["user_features"], "Path should be preserved");
     
-    // Verify app metadata contains expected Quiver-specific information per F-01
     let app_metadata = String::from_utf8(flight_info.app_metadata.to_vec()).unwrap();
     assert!(app_metadata.contains("entity_type:user"), "Should contain entity type metadata");
     assert!(app_metadata.contains("schema_version:1"), "Should contain schema version metadata");
