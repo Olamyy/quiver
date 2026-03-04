@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package quiver.v1;
 
-import "google/protobuf/timestamp.proto";
-
 message EntityKey {
   string entity_type = 1;
   string entity_id = 2;
