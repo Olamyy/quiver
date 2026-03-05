@@ -438,11 +438,11 @@ impl FlightService for QuiverFlightServer {
         request: Request<Action>,
     ) -> Result<Response<Self::DoActionStream>, Status> {
         let action = request.into_inner();
-        tracing::info!("Received action: {}", action.r#type);
+        info!("Received action: {}", action.r#type);
 
         match action.r#type.as_str() {
             "flush_cache" => {
-                tracing::info!("Cache flush requested (noop)");
+                info!("Cache flush requested (noop)");
                 let res = arrow_flight::Result {
                     body: "Cache flushed".into(),
                 };
@@ -450,7 +450,7 @@ impl FlightService for QuiverFlightServer {
                 Ok(Response::new(Box::pin(stream)))
             }
             "reload_registry" => {
-                tracing::info!("Registry reload requested (noop)");
+                info!("Registry reload requested (noop)");
                 let res = arrow_flight::Result {
                     body: "Registry reloaded".into(),
                 };

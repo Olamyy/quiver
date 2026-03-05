@@ -1,8 +1,12 @@
-use crate::adapters::{AdapterError, BackendAdapter};
+use crate::adapters::{
+    AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, PutOptions, TemporalCapability,
+};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct RedisAdapter {
@@ -66,8 +70,65 @@ impl BackendAdapter for RedisAdapter {
         "redis"
     }
 
-    fn temporal_capability(&self) -> crate::adapters::TemporalCapability {
-        crate::adapters::TemporalCapability::CurrentOnly
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            temporal: TemporalCapability::CurrentOnly {
+                typical_latency_ms: 5, // Redis is fast but network-dependent
+            },
+            max_batch_size: Some(5_000), // Redis MGET has practical limits
+            optimal_batch_size: Some(100),
+            typical_latency_ms: 5,
+            supports_parallel_requests: true,
+        }
+    }
+
+    async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError> {
+        if feature_names.is_empty() {
+            return Err(AdapterError::invalid(
+                "redis",
+                "feature_names cannot be empty",
+            ));
+        }
+
+        // For Redis, we need to sample data to determine schema since types are stored as prefixes
+        let mut conn = self.connection.clone();
+        let mut fields = vec![Field::new("entity_id", DataType::Utf8, false)];
+
+        for feature_name in feature_names {
+            // Try to get a sample key to determine the type
+            let sample_key = self.build_key(feature_name, "*");
+            let keys: Vec<String> = conn.keys(&sample_key).await.map_err(|e| {
+                AdapterError::internal("redis", format!("Failed to scan keys for schema: {}", e))
+            })?;
+
+            let data_type = if let Some(key) = keys.first() {
+                let value: Option<String> = conn.get(key).await.map_err(|e| {
+                    AdapterError::internal("redis", format!("Failed to sample value: {}", e))
+                })?;
+
+                if let Some(v) = value {
+                    if v.starts_with("f64:") {
+                        DataType::Float64
+                    } else if v.starts_with("i64:") {
+                        DataType::Int64
+                    } else if v.starts_with("str:") {
+                        DataType::Utf8
+                    } else if v.starts_with("bool:") {
+                        DataType::Boolean
+                    } else {
+                        DataType::Float64 // Default fallback
+                    }
+                } else {
+                    DataType::Float64 // Default for null values
+                }
+            } else {
+                DataType::Float64 // Default when no sample data exists
+            };
+
+            fields.push(Field::new(feature_name, data_type, true));
+        }
+
+        Ok(Schema::new(fields))
     }
 
     async fn get(
@@ -75,7 +136,24 @@ impl BackendAdapter for RedisAdapter {
         entity_ids: &[String],
         feature_names: &[String],
         _as_of: Option<DateTime<Utc>>,
+        _timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {
+        let _start_time = std::time::Instant::now();
+
+        // Check batch size limits
+        let capabilities = self.capabilities();
+        if let Some(max_batch) = capabilities.max_batch_size
+            && entity_ids.len() > max_batch
+        {
+            return Err(AdapterError::resource_limit_exceeded(
+                "redis",
+                format!(
+                    "batch size {} exceeds maximum {}",
+                    entity_ids.len(),
+                    max_batch
+                ),
+            ));
+        }
         let mut conn = self.connection.clone();
 
         let mut columns: Vec<Arc<dyn arrow::array::Array>> = Vec::new();
@@ -187,7 +265,8 @@ impl BackendAdapter for RedisAdapter {
         })
     }
 
-    async fn put(&self, batch: RecordBatch) -> Result<(), AdapterError> {
+    async fn put(&self, batch: RecordBatch, options: &PutOptions) -> Result<(), AdapterError> {
+        let start_time = std::time::Instant::now();
         let mut conn = self.connection.clone();
 
         let schema = batch.schema();
@@ -205,6 +284,16 @@ impl BackendAdapter for RedisAdapter {
         let mut del_keys: Vec<String> = Vec::new();
 
         for i in 0..batch.num_rows() {
+            // Check timeout periodically
+            if let Some(timeout_duration) = options.timeout
+                && start_time.elapsed() > timeout_duration
+            {
+                return Err(AdapterError::timeout(
+                    "redis",
+                    timeout_duration.as_millis() as u64,
+                ));
+            }
+
             let entity_id = entity_ids.value(i);
             for (j, field) in schema.fields().iter().enumerate() {
                 if j == entity_id_idx {
@@ -264,14 +353,14 @@ impl BackendAdapter for RedisAdapter {
         Ok(())
     }
 
-    async fn health(&self) -> crate::adapters::HealthStatus {
+    async fn health(&self) -> HealthStatus {
         let mut conn = self.connection.clone();
         let start = std::time::Instant::now();
         let healthy = redis::cmd("PING")
             .query_async::<String>(&mut conn)
             .await
             .is_ok();
-        crate::adapters::HealthStatus {
+        HealthStatus {
             healthy,
             backend: self.name().to_string(),
             message: if healthy {
@@ -280,6 +369,9 @@ impl BackendAdapter for RedisAdapter {
                 Some("Ping failed".to_string())
             },
             latency_ms: Some(start.elapsed().as_secs_f64() * 1000.0),
+            last_check: Utc::now(),
+            capabilities_verified: healthy,
+            estimated_capacity: if healthy { Some(10_000.0) } else { None },
         }
     }
 }

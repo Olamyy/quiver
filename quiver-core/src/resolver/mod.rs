@@ -58,7 +58,7 @@ impl Resolver {
 
         let batch = adapter
             .value()
-            .get(entity_ids, feature_names, as_of)
+            .get(entity_ids, feature_names, as_of, None)
             .await
             .map_err(ResolverError::Adapter)?;
 
@@ -121,9 +121,11 @@ impl Resolver {
             .get(backend_name)
             .ok_or_else(|| ResolverError::BackendNotFound(backend_name.to_string()))?;
 
+        use crate::adapters::PutOptions;
+
         adapter
             .value()
-            .put(batch)
+            .put(batch, &PutOptions::default())
             .await
             .map_err(ResolverError::Adapter)
     }
