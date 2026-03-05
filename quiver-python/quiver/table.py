@@ -1,10 +1,12 @@
+"""FeatureTable wrapper around PyArrow Table."""
+
 from typing import List, Optional, Any, TYPE_CHECKING
 
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    import pandas  # type: ignore
-    import numpy  # type: ignore
+    import pandas # type: ignore
+    import numpy # type: ignore
 
 from .exceptions import QuiverValidationError
 
@@ -16,13 +18,13 @@ class FeatureTable:
     Arrow's memory efficiency and type safety.
     """
 
-    def __init__(self, table: pa.Table) -> None:  # noqa
-        if not isinstance(table, pa.Table):  # noqa
+    def __init__(self, table: pa.Table) -> None:
+        if not isinstance(table, pa.Table):
             raise QuiverValidationError(f"Expected PyArrow Table, got {type(table)}")
         self._table = table
 
     @property
-    def schema(self) -> pa.Schema:  # noqa
+    def schema(self) -> pa.Schema:
         """Arrow schema of the table."""
         return self._table.schema
 

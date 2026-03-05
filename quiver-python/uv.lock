@@ -1523,7 +1523,7 @@ wheels = [
 ]
 
 [[package]]
-name = "quiver-python"
+name = "quiver-client"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
