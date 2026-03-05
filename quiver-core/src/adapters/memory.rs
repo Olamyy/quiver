@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
+use std::time::Duration;
 
 use arrow::array::{
     Array, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
@@ -10,7 +11,9 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
-use super::{AdapterError, BackendAdapter, HealthStatus, TemporalCapability};
+use super::{
+    AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, PutOptions, TemporalCapability,
+};
 
 const BACKEND_NAME: &str = "memory";
 
@@ -133,8 +136,40 @@ impl BackendAdapter for MemoryAdapter {
         BACKEND_NAME
     }
 
-    fn temporal_capability(&self) -> TemporalCapability {
-        TemporalCapability::TimeTravel
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            temporal: TemporalCapability::TimeTravel {
+                typical_latency_ms: 1,
+            },
+            max_batch_size: Some(10_000),
+            optimal_batch_size: Some(1_000),
+            typical_latency_ms: 1,
+            supports_parallel_requests: true,
+        }
+    }
+
+    async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError> {
+        if feature_names.is_empty() {
+            return Err(AdapterError::invalid(
+                BACKEND_NAME,
+                "feature_names cannot be empty",
+            ));
+        }
+
+        let rows = self.rows.read().unwrap();
+        let mut fields = vec![Field::new("entity_id", DataType::Utf8, false)];
+
+        for feature_name in feature_names {
+            let data_type = rows
+                .iter()
+                .find_map(|row| row.features.get(feature_name))
+                .map(|value| value.data_type())
+                .unwrap_or(DataType::Float64);
+
+            fields.push(Field::new(feature_name, data_type, true));
+        }
+
+        Ok(Schema::new(fields))
     }
 
     async fn get(
@@ -142,7 +177,10 @@ impl BackendAdapter for MemoryAdapter {
         entity_ids: &[String],
         feature_names: &[String],
         as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {
+        let start_time = std::time::Instant::now();
+
         if entity_ids.is_empty() {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
@@ -155,6 +193,21 @@ impl BackendAdapter for MemoryAdapter {
                 "feature_names cannot be empty",
             ));
         }
+
+        let capabilities = self.capabilities();
+        if let Some(max_batch) = capabilities.max_batch_size
+            && entity_ids.len() > max_batch
+        {
+            return Err(AdapterError::resource_limit_exceeded(
+                BACKEND_NAME,
+                format!(
+                    "batch size {} exceeds maximum {}",
+                    entity_ids.len(),
+                    max_batch
+                ),
+            ));
+        }
+
         let cutoff = as_of.unwrap_or_else(Utc::now);
         let rows = self.rows.read().unwrap();
 
@@ -170,11 +223,22 @@ impl BackendAdapter for MemoryAdapter {
 
         drop(rows);
 
+        if let Some(timeout_duration) = timeout
+            && start_time.elapsed() > timeout_duration
+        {
+            return Err(AdapterError::timeout(
+                BACKEND_NAME,
+                timeout_duration.as_millis() as u64,
+            ));
+        }
+
         build_record_batch(entity_ids, feature_names, resolved)
             .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))
     }
 
-    async fn put(&self, batch: RecordBatch) -> Result<(), AdapterError> {
+    async fn put(&self, batch: RecordBatch, options: &PutOptions) -> Result<(), AdapterError> {
+        let start_time = std::time::Instant::now();
+
         let entity_col = batch
             .column_by_name("entity_id")
             .and_then(|c| c.as_any().downcast_ref::<StringArray>())
@@ -200,6 +264,15 @@ impl BackendAdapter for MemoryAdapter {
         let mut store = self.rows.write().unwrap();
 
         for row_idx in 0..batch.num_rows() {
+            if let Some(timeout_duration) = options.timeout
+                && start_time.elapsed() > timeout_duration
+            {
+                return Err(AdapterError::timeout(
+                    BACKEND_NAME,
+                    timeout_duration.as_millis() as u64,
+                ));
+            }
+
             let entity_id = entity_col.value(row_idx).to_string();
 
             let feature_ts = ts_col
@@ -230,6 +303,21 @@ impl BackendAdapter for MemoryAdapter {
                 features.insert(col_name.clone(), value);
             }
 
+            // Handle upsert vs insert behavior
+            if !options.upsert
+                && store
+                    .iter()
+                    .any(|row| row.entity_id == entity_id && row.feature_ts == feature_ts)
+            {
+                return Err(AdapterError::invalid(
+                    BACKEND_NAME,
+                    format!(
+                        "entity {} already exists at timestamp {}",
+                        entity_id, feature_ts
+                    ),
+                ));
+            }
+
             store.push(FeatureRow {
                 entity_id,
                 features,
@@ -246,7 +334,10 @@ impl BackendAdapter for MemoryAdapter {
             healthy: true,
             backend: BACKEND_NAME.to_string(),
             message: Some(format!("{} rows stored", count)),
-            latency_ms: Some(0.0),
+            latency_ms: Some(0.1),
+            last_check: Utc::now(),
+            capabilities_verified: true,
+            estimated_capacity: Some(100_000.0),
         }
     }
 }
@@ -422,6 +513,7 @@ mod tests {
                 &["user:101".to_string(), "user:102".to_string()],
                 &["spend_30d".to_string(), "session_count".to_string()],
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -456,6 +548,7 @@ mod tests {
                 &["user:101".to_string()],
                 &["spend_30d".to_string()],
                 Some(ts(20)),
+                None,
             )
             .await
             .unwrap();
@@ -483,6 +576,7 @@ mod tests {
                 &["user:101".to_string()],
                 &["spend_30d".to_string(), "session_count".to_string()],
                 Some(ts(10)),
+                None,
             )
             .await
             .unwrap();
@@ -517,6 +611,7 @@ mod tests {
                 ],
                 &["spend_30d".to_string()],
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -544,6 +639,7 @@ mod tests {
                 &["user:101".to_string()],
                 &["spend_30d".to_string()],
                 Some(ts(40)),
+                None,
             )
             .await
             .unwrap();
@@ -567,6 +663,7 @@ mod tests {
                 &["user:102".to_string(), "user:101".to_string()],
                 &["spend_30d".to_string()],
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -586,7 +683,12 @@ mod tests {
     async fn test_entity_id_column_always_present() {
         let adapter = make_adapter();
         let batch = adapter
-            .get(&["user:101".to_string()], &["spend_30d".to_string()], None)
+            .get(
+                &["user:101".to_string()],
+                &["spend_30d".to_string()],
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert!(batch.column_by_name("entity_id").is_some());
@@ -595,14 +697,18 @@ mod tests {
     #[tokio::test]
     async fn test_empty_entity_ids_errors() {
         let adapter = MemoryAdapter::new();
-        let result = adapter.get(&[], &["spend_30d".to_string()], None).await;
+        let result = adapter
+            .get(&[], &["spend_30d".to_string()], None, None)
+            .await;
         assert!(matches!(result, Err(AdapterError::InvalidRequest { .. })));
     }
 
     #[tokio::test]
     async fn test_empty_feature_names_errors() {
         let adapter = MemoryAdapter::new();
-        let result = adapter.get(&["user:101".to_string()], &[], None).await;
+        let result = adapter
+            .get(&["user:101".to_string()], &[], None, None)
+            .await;
         assert!(matches!(result, Err(AdapterError::InvalidRequest { .. })));
     }
 

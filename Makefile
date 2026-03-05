@@ -13,65 +13,65 @@
 	@protoc --version || echo 'Please install protoc: https://grpc.io/docs/protoc-installation/'
 
 .PHONY: install-py
-install-py: .uv 
+install-py: .uv ## Install Python dependencies using uv
 	cd quiver-python && uv sync
 
 .PHONY: install
-install: .cargo .protoc install-py 
+install: .cargo .protoc install-py ## Install all dependencies (Rust, Python, protoc)
 	cd quiver-core && cargo check --all-features
 
 .PHONY: dev-py
-dev-py: install-py 
+dev-py: install-py ## Setup Python development environment
 	@echo "Python client ready - no build step needed for gRPC client"
 
 .PHONY: dev-py-release
-dev-py-release: install-py 
+dev-py-release: install-py ## Setup Python development environment (release mode)
 	@echo "Python client ready - no build step needed for gRPC client"
 
 .PHONY: format-rs
-format-rs: 
+format-rs: ## Format Rust code using cargo fmt
 	cd quiver-core && cargo fmt --all
 
 .PHONY: format-py
-format-py: 
+format-py: ## Format Python code using ruff
 	cd quiver-python && uv run ruff format
 
 .PHONY: format
-format: format-rs format-py 
+format: format-rs format-py ## Format all code (Rust + Python)
 
 .PHONY: lint-rs
-lint-rs: 
+lint-rs: ## Lint Rust code using clippy (treats warnings as errors)
 	@cargo clippy --version
 	cd quiver-core && cargo clippy --all-features -- -D warnings
 
 .PHONY: lint-py
-lint-py: dev-py 
+lint-py: dev-py ## Lint Python code using ruff
 	cd quiver-python && uv run ruff check
 
 .PHONY: lint
-lint: lint-rs lint-py 
+lint: lint-rs lint-py ## Lint all code (Rust + Python)
 
 .PHONY: test-rs
-test-rs: .protoc 
+test-rs: .protoc ## Run all Rust tests
 	cd quiver-core && cargo test --all-features
 
 .PHONY: test-rs-single
-test-rs-single: .protoc 
+test-rs-single: .protoc ## Run specific Rust test (usage: make test-rs-single TEST=test_name)
 	cd quiver-core && cargo test --all-features $(TEST)
 
 .PHONY: test-rs-integration
-test-rs-integration: .protoc 
+test-rs-integration: .protoc ## Run only integration tests
 	cd quiver-core && cargo test --test integration_tests
 
 .PHONY: pytest
-pytest: dev-py 
+pytest: dev-py ## Run Python tests
 	cd quiver-python && (uv run pytest || echo "No Python tests found - skipping")
 
 .PHONY: test
-test: test-rs pytest 
+test: test-rs pytest ## Run all tests (Rust + Python)
 
 .PHONY: testcov
-testcov: .protoc 
+testcov: .protoc ## Generate test coverage report (HTML + XML)
 	@cargo tarpaulin --version > /dev/null 2>&1 || cargo install cargo-tarpaulin
 	cd quiver-core && cargo tarpaulin --out xml --output-dir ..
 	cd quiver-core && cargo tarpaulin --out html --output-dir ..
@@ -79,39 +79,54 @@ testcov: .protoc
 	@echo "HTML report: ./tarpaulin-report.html"
 
 .PHONY: proto-gen
-proto-gen: .protoc 
+proto-gen: .protoc ## Generate protobuf bindings (triggered automatically by build)
 	cd quiver-core && cargo build
 
 .PHONY: proto-check
-proto-check: .protoc 
+proto-check: .protoc ## Validate protobuf definitions
 	cd proto/v1 && protoc --descriptor_set_out=/dev/null *.proto
 
 .PHONY: build
-build: .protoc 
+build: .protoc ## Build Rust code (debug mode)
 	cd quiver-core && cargo build --all-features
 
 .PHONY: build-release
-build-release: .protoc 
+build-release: .protoc ## Build Rust code (release mode)
 	cd quiver-core && cargo build --release --all-features
 
 .PHONY: check
-check: .protoc 
+check: .protoc ## Quick syntax check without building
 	cd quiver-core && cargo check --all-features
 
 .PHONY: run
-run: .protoc 
+run: .protoc ## Run Quiver server (debug mode, optional CONFIG=path/to/config.yaml)
 	cd quiver-core && cargo run $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: run-release
-run-release: .protoc 
+run-release: .protoc ## Run Quiver server (release mode, optional CONFIG=path/to/config.yaml)
 	cd quiver-core && cargo run --release $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: quality
-quality: format lint 
+quality: format lint ## Run full quality pipeline (format + lint)
 
 .PHONY: ci-check
-ci-check: 
+ci-check: ## Run complete CI pipeline (format check + lint + test)
 	cd quiver-core && cargo fmt --all -- --check
 	cd quiver-core && cargo clippy --all-features -- -D warnings
 	cd quiver-core && cargo test --all-features
 
+.PHONY: main
+main: quality test ## Main development workflow (quality + test)
+
+.PHONY: help
+help: ## Show this help message
+	@echo "Usage: make [recipe]"
+	@echo "Recipes:"
+	@awk '/^[a-zA-Z0-9_-]+:.*?##/ { \
+	    helpMessage = match($$0, /## (.*)/); \
+	        if (helpMessage) { \
+	            recipe = $$1; \
+	            sub(/:/, "", recipe); \
+	            printf "  \033[36mmake %-20s\033[0m %s\n", recipe, substr($$0, RSTART + 3, RLENGTH); \
+	    } \
+	}' $(MAKEFILE_LIST)
