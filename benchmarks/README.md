@@ -1,124 +1,154 @@
-# Quiver ML Inference Benchmarks
+# Quiver Benchmarks
 
-This benchmark suite proves Quiver's value proposition for real-world ML inference workloads by comparing it against traditional feature serving approaches.
+Performance benchmarks comparing Quiver against traditional feature serving methods.
 
 ## Quick Start
 
 ```bash
-# Run complete benchmark suite (30 seconds per scenario)
-make bench
+# Python benchmarks (currently available)
+make bench-py              # Standard 60s benchmark (all methods)
+make bench-py-quick        # Quick 30s verification  
+make bench-py-heavy        # Heavy 120s load test
+make bench-py-scenarios    # List available test configurations
 
-# Run quick verification (10 second timeout)
-make bench-quick
+# Start HTTP server for benchmarking (runs in foreground)
+make bench-py-http
 
-# Run precise Criterion benchmarks with detailed analysis
-make bench-criterion
-
-# Generate reports and view results
-make bench-report
+# Rust benchmarks (placeholder - not implemented)
+make bench                 # Would run Rust benchmark suite
+make bench-criterion       # Would run Criterion-based benchmarks
 ```
 
-## What This Proves
+## Python Benchmark Implementation
 
-Instead of testing "do the gRPC methods work?" (which is already covered by unit tests), these benchmarks answer the business question: **"Should I use Quiver for my ML inference workload?"**
+### Test Methods
 
-### Real Performance Questions Answered:
-- How much faster is feature lookup for a recommendation model?
-- How does zero-copy transfer improve end-to-end inference time?
-- Can I replace my current feature serving with this and get better performance?
-- What are the cost implications of switching to Quiver?
+The Python benchmark suite compares four feature serving approaches:
 
-### Scenarios Tested:
+1. **`direct_redis_binary`** - Direct Redis access using Quiver's binary format
+2. **`direct_redis_json`** - Direct Redis access using JSON serialization  
+3. **`quiver_client`** - Quiver gRPC client using Arrow Flight
+4. **`http_api`** - HTTP REST API baseline
 
-#### E-commerce Recommendations
-- **Workload:** Product recommendations with user, item, and context features
-- **Scale:** 10,000 users, ~60 features per request
-- **Comparison:** Quiver (Arrow Flight) vs Redis+JSON
-- **Metrics:** Latency, throughput, memory usage, operational complexity
+### Available Scenarios
 
-*Future scenarios (planned):*
-- **Fraud Detection:** Real-time transaction scoring with 500+ features
-- **Ad Targeting:** User profile + context features for ad serving
-- **Batch Scoring:** Large-scale batch predictions cost analysis
+| Name | Duration | Concurrency | Entities | Features |
+|------|----------|-------------|----------|----------|
+| `quick` | 30s | 50 | 1,000 | 30 |
+| `standard` | 60s | 100 | 10,000 | 60 |
+| `heavy` | 120s | 200 | 50,000 | 120 |
+| `burst_test` | 300s | 100 | 10,000 | 60 |
+| `capacity_test` | 180s | 100 | 25,000 | 80 |
 
-## Business Impact Results
+### Prerequisites
 
-Expected benchmark results demonstrate:
+The benchmarks require these services running:
 
-```
-PERFORMANCE IMPROVEMENTS:
-   - 2.5x faster inference vs Redis+JSON
-   - 40% reduction in memory usage
-   - Sub-10ms P95 latency for feature-heavy workloads
+1. **Redis server** - `make redis-start`
+2. **Quiver server** - `make run` (or `make run-release` for production builds)
+3. **HTTP server** - `make bench-py-http` (for HTTP API tests only)
 
-COST BENEFITS:
-   - Lower infrastructure costs due to memory efficiency
-   - Reduced operational overhead (fewer services to maintain)
-   - Better user experience from faster response times
-```
+### Full Benchmark Setup
 
-## Report Formats
+```bash
+# Terminal 1: Start Redis
+make redis-start
 
-### Executive Summary (Console)
-Real-time results with business-focused metrics during benchmark execution.
+# Terminal 2: Start Quiver server  
+make run
 
-### Detailed Reports (Files)
-- **JSON:** `reports/benchmark_report_TIMESTAMP.json` - Machine-readable results
-- **Markdown:** `reports/benchmark_report_TIMESTAMP.md` - Human-readable analysis
+# Terminal 3: Run benchmarks
+make bench-py
 
-### Criterion Analysis (HTML)
-- **Charts:** `target/criterion/` - Detailed performance visualization
-- **Comparisons:** Statistical analysis of performance differences
-
-## Architecture
-
-```
-benchmarks/
-├── main.rs                     # Main benchmark runner
-├── lib.rs                      # Report generation and orchestration
-├── inference/                  # ML inference scenario benchmarks
-│   └── recommendation_system.rs   # E-commerce recommendation benchmark
-├── vs_alternatives/            # Head-to-head comparisons (future)
-└── benches/                    # Criterion-based precise benchmarks
-    └── recommendation_benchmark.rs
+# Optional Terminal 4: HTTP server (only needed for HTTP API tests)
+make bench-py-http
 ```
 
-## Benchmark Methodology
+### Individual Test Commands
 
-### Realistic Workloads
-- **Data:** Synthetic but realistic feature distributions
-- **Scale:** Production-like entity counts and feature dimensions  
-- **Patterns:** Request patterns that match actual ML serving
+```bash
+cd benchmarks/python
 
-### Fair Comparisons
-- **Baseline:** Redis+JSON (most common current approach)
-- **Environment:** Same hardware, network, and resource constraints
-- **Timing:** End-to-end latency including serialization overhead
+# Run specific scenario
+uv run python run_benchmark.py run --scenario standard
 
-### Business Metrics
-- **Latency:** P50/P95/P99 response times that affect user experience
-- **Throughput:** Requests per second under sustained load
-- **Resources:** Memory and CPU usage translating to infrastructure costs
-- **Reliability:** Success rates and error handling
+# Test specific methods only
+uv run python run_benchmark.py run --scenario quick --methods quiver_client,direct_redis_json
 
-## Extending the Benchmarks
+# Custom configuration
+uv run python run_benchmark.py run --scenario heavy --methods quiver_client
+```
 
-To add new benchmark scenarios:
+## Results Format
 
-1. **Create scenario module:** `benchmarks/inference/new_scenario.rs`
-2. **Implement comparison:** Quiver vs alternative approach
-3. **Add to runner:** Include in `benchmarks/lib.rs::run_all_benchmarks()`
-4. **Update Makefile:** Add any new commands if needed
+### Console Output
+Real-time progress with final results table showing:
+- Average, P50, P95, P99 latency (ms)
+- Throughput (requests/second)
+- Success rate
+- CPU and memory usage
 
-### Example Scenario Structure:
-```rust
-pub async fn run_fraud_detection_benchmark() -> BenchmarkResults {
-    // 1. Define realistic fraud detection workload
-    // 2. Implement Quiver-based feature serving
-    // 3. Implement traditional database+cache approach
-    // 4. Run head-to-head performance comparison
-    // 5. Return business-focused metrics
+### JSON Export
+Results exported to `reports/benchmark_report_TIMESTAMP.json` with structure:
+```json
+{
+  "config": { "duration_seconds": 60, "concurrent_requests": 100, ... },
+  "environment": { "redis_available": true, "quiver_available": true, ... },
+  "metrics": {
+    "direct_redis_binary": {
+      "avg_latency_ms": 12.5,
+      "p95_latency_ms": 25.1,
+      "throughput_rps": 850.2,
+      "success_rate": 0.998,
+      ...
+    }
+  }
 }
 ```
 
-This ensures all benchmarks prove real business value rather than just technical functionality.
+## Implementation Structure
+
+```
+benchmarks/
+├── python/
+│   ├── run_benchmark.py           # CLI entry point
+│   └── quiver_benchmarks/
+│       ├── benchmark_runner.py    # Main orchestrator  
+│       ├── config.py              # Test scenarios and settings
+│       ├── models.py              # Result data structures
+│       ├── environment.py         # Infrastructure detection
+│       └── clients/               # Test client implementations
+│           ├── direct_redis.py    # Direct Redis clients
+│           ├── quiver_client.py   # Quiver gRPC client
+│           └── http_client.py     # HTTP API client
+└── reports/                       # Generated result files
+```
+
+## Adding New Test Methods
+
+1. Create client in `quiver_benchmarks/clients/new_method.py`:
+```python
+class NewMethodClient:
+    async def get_features(self, entity_id: str, feature_names: list[str]) -> dict:
+        # Implement feature retrieval
+        pass
+
+async def benchmark_new_method(config: BenchmarkConfig) -> PerformanceMetrics:
+    # Implement benchmarking logic
+    pass
+```
+
+2. Add to `BenchmarkMethod` enum in `config.py`
+3. Import and register in `benchmark_runner.py`
+
+## Adding New Scenarios
+
+Add to `SCENARIOS` dict in `config.py`:
+```python
+"new_scenario": BenchmarkConfig(
+    duration_seconds=90,
+    concurrent_requests=150,
+    num_entities=20_000,
+    features_per_request=80,
+)
+```
