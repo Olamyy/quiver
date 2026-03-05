@@ -1804,6 +1804,7 @@ dependencies = [
  "prost-types",
  "redis",
  "serde",
+ "serde_json",
  "serde_yaml",
  "thiserror",
  "tokio",

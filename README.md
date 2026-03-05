@@ -1,164 +1,286 @@
 # Quiver
 
-Quiver is an __experimental__ in-flight grpc server for serving features across different backends. 
-It holds Arrow-formatted feature data and serves it to model servers on demand. Think of it as **Triton for feature serving**.
+**Quiver** is an experimental, Arrow‑native feature serving layer for machine learning inference.
+
+It sits between model servers and feature backends, resolving feature requests, executing parallel retrieval across data sources, and returning columnar feature data via Arrow Flight.
+
+Quiver focuses on a part of the ML stack that is often overlooked: **the serving path from computed features to model inputs**.
 
 ---
 
-## Why?
+# Overview
 
-Feature stores are good at registering, versioning and computing features. 
-An area that has not received as much attention is the path from computed feature to model input.
-Today, the serving path for a lot of inference workloads looks something like this:
+Modern ML systems typically invest heavily in feature computation and model training, but the real‑time path that delivers features to models often evolves organically inside application code.
 
-```mermaid
-graph TD
-    subgraph Offline_Processing ["Feature Computation (Batch/Stream)"]
-        A["<b>Feature Computation</b><br/>(Spark / DuckDB / Polars)<br/><i>Internal: Arrow Columnar</i>"]
-    end
+Typical inference pipelines end up performing several expensive transformations:
 
-    subgraph Serialization_Layer ["Data Transformation"]
-        B["<b>Serialize</b><br/>(JSON / Protobuf / MessagePack)<br/><i>Row-Oriented Format</i>"]
-    end
+1. Fetch feature rows from multiple backends
+2. Deserialize row‑oriented data
+3. Join results across sources
+4. Convert rows into arrays
+5. Convert arrays into tensors
 
-    subgraph Storage_Layer ["Online Feature Store"]
-        C[("<b>Online Store</b><br/>(Redis GET/SET)")]
-    end
+This results in unnecessary latency, duplicated logic across services, and limited observability into what features models actually consume.
 
-    subgraph Serving_Layer ["Real-time Inference"]
-        D["<b>Read & Deserialize</b><br/>(From Row-Oriented Format)"]
-        E["<b>Re-serialize / Cast</b><br/>(NumPy Array / Torch Tensor)"]
-        F{{"<b>Model Inference</b>"}}
-    end
+Quiver extracts this responsibility into a dedicated infrastructure layer.
 
-    %% Flow connections
-    A -->|Convert to Rows| B
-    B -->|Write| C
-    C -->|Fetch| D
-    D -->|Reshape| E
-    E --> F
+---
 
-    %% Styling
-    style A fill:#d4e1f5,stroke:#2b5797
-    style C fill:#f8cecc,stroke:#b85450
-    style F fill:#d5e8d4,stroke:#82b366
+# Motivation
+
+In many production inference systems the serving path resembles the following pipeline.
+
+```
+Feature Computation
+(Spark / Polars / DuckDB)
+        |
+        v
+Serialize rows
+(JSON / Protobuf)
+        |
+        v
+Online store
+(Redis / key‑value)
+        |
+        v
+Application server
+        |
+        |-- fetch features from multiple systems
+        |-- deserialize rows
+        |-- reshape arrays
+        |-- convert to tensors
+        v
+Model inference
 ```
 
-From the diagram above, several bottlenecks become apparent:
-- **Redundant SerDe**: Serialization happens on every request, costing CPU cycles and increasing latency.
-- **Impedance Mismatch**: Row-oriented formats (JSON/Protobuf) are fundamentally at odds with the columnar nature of modern data processing and ML.
-- **Fan-Out logic in Model Servers**: Application code becomes bloated with infrastructure glue for querying multiple backends.
+Several inefficiencies appear in this design.
 
-Quiver aims to optimize the inference path from computation to model input by:
+## Repeated serialization
 
-- **Zero-Copy Memory Mapping**: For Arrow-native backends (Parquet, Delta Lake, Snowflake), data maintains its columnar memory layout from disk to model memory. No CPU-bound serialization ever occurs.
-- **Transcoding Cache**: For legacy row-oriented backends (Redis/RonDB), Quiver keeps data as Arrow buffers in memory on the first cache miss. Subsequent "warm" hits are served as zero-copy Arrow buffers, bypassing the slow database path.
-- **Kernel-Level Alignment**: By serving Arrow directly, Quiver aligns perfectly with the internal memory representation of NumPy, PyTorch, and JAX, enabling O(1) transfer to model tensors.
-- **Observability without Instrumentation**: A monitoring interceptor observes the Arrow stream directly to track drift, null rates, and latency without modifying feature definitions.
+Features are often converted from columnar formats used during computation into row formats for storage, then converted back into arrays for inference.
+
+Each request incurs repeated serialization and deserialization overhead.
+
+## Row‑oriented data in a columnar workload
+
+Machine learning frameworks operate on vectors and tensors, yet many feature serving systems return row‑oriented data structures.
+
+This mismatch forces additional reshaping and copying inside model servers.
+
+## Fan‑out logic inside model services
+
+When features reside in multiple systems (for example Redis, Parquet, or a feature store), model servers must coordinate several backend requests.
+
+This logic is often duplicated across services and grows increasingly complex as feature sets expand.
+
+## Limited observability
+
+Monitoring systems frequently track feature pipelines or model outputs, but rarely capture statistics about **the actual features sent to models at serving time**.
 
 ---
 
-## The Vision
+# What Quiver Does
 
-While NVIDIA Triton optimizes the compute-bound execution of models on GPUs, Quiver optimizes the I/O-bound orchestration of the data that feeds them.
+Quiver provides a unified layer that resolves feature requests and returns columnar feature batches optimized for inference workloads.
 
-In a traditional stack, model servers are burdened with the overhead of feature orchestration—querying disparate databases, parsing row-oriented data, and manually aligning entity keys into tensors. Quiver offloads this data preparation phase into a dedicated, Rust-based infrastructure layer.
+Key capabilities include:
+
+### Feature resolution
+
+Model servers request logical feature names rather than backend‑specific queries.
+
+The Quiver resolver determines:
+
+* which backend stores each feature
+* which entity key should be used
+* the Arrow schema for the result
+
+This decouples model servers from storage details.
+
+### Parallel backend execution
+
+Feature requests are executed in parallel across multiple backends, eliminating sequential round‑trips from model servers.
+
+### Columnar feature transport
+
+Quiver returns feature data as Arrow `RecordBatch` objects via Arrow Flight.
+
+Columnar batches enable efficient vectorized processing and straightforward conversion into tensors.
+
+### Stale‑While‑Revalidate caching
+
+Quiver includes an optional SWR cache that allows low‑latency serving while asynchronously refreshing stale values.
+
+### Serving‑time observability
+
+Because Quiver sits directly on the serving path, it can observe feature distributions and latency without requiring instrumentation inside model services.
 
 ---
 
+# Design Goals
 
-## Architecture
+Quiver is built around several principles.
 
-```mermaid
-graph TB
-    subgraph Clients
-        MS[Model Server]
-        TP[Training Pipeline]
-    end
+## Arrow‑native data path
 
-    subgraph "Quiver Server"
-        FE[Flight Endpoint]
-        FR[Feature Resolver]
-        SWR[SWR Cache]
-        FO[Fan-out Coordinator]
-    end
+Whenever possible, Quiver keeps features in Arrow columnar buffers from storage through inference.
 
-    subgraph Backends
-        REDIS[(Redis)]
-        HOP[(Hopsworks / RonDB)]
-        S3[(S3 / Parquet)]
-    end
+This avoids repeated row‑to‑column transformations and allows efficient batch processing.
 
-    MS -->|Arrow Flight| FE
-    FE --> FR
-    FR --> SWR
-    SWR -->|Miss| FO
-    FO --> REDIS
-    FO --> HOP
-    FO --> S3
+## Decoupled feature resolution
+
+Model servers should not need to know where features are stored or how they are retrieved.
+
+All backend routing logic lives inside Quiver.
+
+## Vectorized serving
+
+Inference workloads frequently request features for many entities simultaneously. Quiver is optimized for returning batches of features rather than individual rows.
+
+## Minimal application complexity
+
+Model services should ideally perform only two operations:
+
+1. request features
+2. run inference
+
+---
+
+# Architecture
+
+The Quiver server consists of several cooperating components.
+
+```
+Clients
+  |
+  v
+Arrow Flight Endpoint
+  |
+  v
+Feature Resolver
+  |
+  v
+Cache Layer (optional SWR)
+  |
+  v
+Execution Engine
+  |
+  +---- Redis
+  +---- Feature store
+  +---- Parquet / object storage
 ```
 
-## Current Status: v0.1 Alpha
+## Flight endpoint
 
-Quiver is in early development. The core Arrow flight server is complete. The server is implemented in Rust for high performance and zero-copy serving.
+Exposes the Arrow Flight RPC interface used by clients to request feature batches.
 
-### What's Possible Now
-- **Arrow Flight Protocol**: Implements the standard `FlightService` for unified data transport.
-- **Unified Resolver**: Decouples model servers from backend specifics.
-- **Memory Adapter**: High-performance in-memory backend for testing and fast lookups.
-- **Static Registry**: Centralized management of feature schemas and backend routing.
-- **gRPC Health Check**: Native support for standard health probes (`grpc.health.v1.Health`).
-- **gRPC Reflection**: Integrated service discovery for tools like `grpcurl`.
+## Feature resolver
+
+Maps logical feature requests to backend locations and determines how features should be assembled.
+
+## Cache layer
+
+Stores Arrow batches in memory and optionally supports stale‑while‑revalidate behavior.
+
+## Execution engine
+
+Coordinates parallel retrieval from backend adapters and merges results into a single Arrow batch.
+
 ---
 
-## Getting Started
+# Feature Request Model
 
-### Prerequisites
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Protobuf Compiler](https://grpc.io/docs/protoc-installation/) (`brew install protobuf` on Mac)
-- [grpcurl](https://github.com/fullstorydev/grpcurl) (for manual testing)
+A typical request includes:
 
-### Quick Start
+* a feature view
+* one or more entities
+* a subset of feature columns
 
-1. **Clone and build**:
-   ```bash
-   git clone <repository-url>
-   cd quiver
-   make  # Runs quality checks and tests
-   ```
+Example:
 
-2. **Create configuration** (see [Configuration](#configuration) section below)
+```
+feature_view: user_features
+entities: ["user_123", "user_456"]
+features: ["score", "country"]
+```
 
-3. **Start the server**:
-   ```bash
-   make run
-   # Or use cargo directly:
-   # cd quiver-core && cargo run
-   ```
+The resolver determines which backends contain the requested features and executes the request accordingly.
 
-4. **Verify it's working**:
-   ```bash
-   # Check server health
-   grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
-   
-   # List available services
-   grpcurl -plaintext localhost:8815 list
-   ```
+---
 
-### Configuration
+# Observability
 
-Quiver uses a layered configuration system. Settings are resolved in the following order of precedence:
+Quiver can observe feature traffic directly and produce useful metrics such as:
 
-1.  **Environment Variables**: Prefixed with `QUIVER__` (e.g., `QUIVER__SERVER__PORT=9001`).
-2.  **Config File**: A mandatory `config.yaml` file in the working directory.
-3.  **Defaults**: Internal fallbacks (Host: `0.0.0.0`, Port: `8815`).
+* feature null rates
+* value distributions
+* request latency
+* backend latency
 
-> [!IMPORTANT]
-> The server will fail to start if the `config.yaml` file is missing, or if either the `registry.views` or `adapters` sections are empty.
+These metrics can help detect issues like feature drift or missing data that might otherwise go unnoticed until model performance degrades.
 
-### Example `config.yaml`
+---
 
-```yaml
+# Current Status
+
+Quiver is currently in **v0.1 alpha**.
+
+The project is intended for experimentation and early evaluation.
+
+Implemented components include:
+
+* Arrow Flight server
+* basic feature resolver
+* in‑memory adapter
+* static feature registry
+* gRPC health checks
+* Python client
+
+---
+
+# Quick Start
+
+## Prerequisites
+
+* Rust
+* Protobuf compiler
+* grpcurl
+
+## Build
+
+```
+ git clone <repository-url>
+ cd quiver
+ make
+```
+
+## Start the server
+
+```
+make run
+```
+
+## Verify health
+
+```
+grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
+```
+
+---
+
+# Configuration
+
+Quiver uses a YAML configuration file combined with environment variables.
+
+Configuration precedence:
+
+1. environment variables
+2. config file
+3. defaults
+
+Example configuration:
+
+```
 server:
   host: "127.0.0.1"
   port: 8815
@@ -170,10 +292,11 @@ registry:
       entity_type: "user"
       entity_key: "user_id"
       columns:
-        - name: "entity_id"
+        - name: "user_id"
           arrow_type: "string"
           nullable: false
           source: "memory"
+
         - name: "score"
           arrow_type: "float64"
           nullable: true
@@ -184,112 +307,147 @@ adapters:
     type: memory
 ```
 
-Once the config file is ready, start the server:
-
-```bash
-make run
-```
-
-The server starts on `127.0.0.1:8815` and should display:
-```
-INFO Quiver server starting on 127.0.0.1:8815
-INFO Loaded 1 feature view: user_features
-INFO Server ready for connections
-```
-
 ---
 
+# Python Client
 
-## Exploring the API
+Quiver includes a Python client. [See Python Client Documentation](quiver-python/README.md)
 
-### List Services
-You can discover all available services:
-```bash
-grpcurl -plaintext localhost:8815 list
+
+Example usage:
+
 ```
-
-### Fetch a Schema
-Retrieve the Arrow schema for the `user_features` view:
-```bash
-grpcurl -plaintext -d '{"path": ["user_features"]}' \
-  localhost:8815 arrow.flight.protocol.FlightService/GetSchema
-```
-
-### Check Health
-```bash
-grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
-```
-
----
-
-## Python Client
-
-Quiver includes a high-performance Python client with zero-copy Arrow integration, ML framework exports (pandas, PyTorch, TensorFlow, Polars), and comprehensive error handling.
-
-**[📖 See Python Client Documentation](quiver-python/README.md)**
-
-Quick example:
-```python
 import quiver
 
 client = quiver.Client("localhost:8815")
+
 features = client.get_features(
     feature_view="user_features",
     entities=["user_123", "user_456"],
-    features=["entity_id", "score"]
+    features=["score"]
 )
-df = features.to_pandas()
+
+print(features.to_pandas())
+
 client.close()
 ```
 
 ---
 
-## Development
-
-### Build System
-
-Quiver uses `make` for all development tasks:
-
-```bash
-# Main workflow - format, lint, and test everything
-make
-
-# Individual tasks
-make build          # Build Rust components
-make test-rs        # Run Rust tests only
-make pytest         # Run Python tests only
-make quality        # Format and lint all code
-make run            # Start the development server
-```
-
-### Project Structure
+# Project Structure
 
 ```
 quiver/
-├── quiver-core/         # Rust server implementation
-├── quiver-python/       # Python client library
-├── proto/v1/           # Protocol buffer definitions
-├── conf.yaml           # Example configuration
-└── Makefile           # Build automation
-```
 
-### Testing
+quiver-core/
+  Rust server implementation
 
-The project includes comprehensive test coverage:
-- **Unit tests**: Core logic and adapter functionality
-- **Integration tests**: End-to-end server behavior
-- **Python client tests**: Client library functionality
+quiver-python/
+  Python client
 
-Run all tests with:
-```bash
-make test
+proto/
+  RPC definitions
+
+configs/
+  Example configurations
 ```
 
 ---
 
-## Roadmap
+# Development
 
-- v0.1 Alpha: Core Rust server, DuckDB/Redis adapters, basic hot cache. (Current)
-- v0.2 Beta: Multi-backend fan-out, SWR cache manager, Feast registry integration.
-- v0.3: Kafka Streams adapter, bidirectional do_exchange for high-frequency serving.
-- v1.0: Production HA deployment, multi-tenancy, and performance benchmarks.
+Common commands:
+
+```
+make build
+make test
+make run
+```
+
+---
+
+# Roadmap
+
+## v0.1 — Foundations
+
+Core feature serving prototype.
+
+Goals:
+
+* Arrow Flight server
+* basic resolver
+* in‑memory adapter
+* static registry
+
+## v0.2 — Multi‑backend execution
+
+Introduce real fan‑out capabilities.
+
+Goals:
+
+* Redis adapter
+* Parquet / object storage adapter
+* parallel execution engine
+* result merging
+
+## v0.3 — Caching and freshness
+
+Introduce serving‑time performance features.
+
+Goals:
+
+* stale‑while‑revalidate cache
+* configurable TTL policies
+* cache metrics
+
+## v0.4 — Observability
+
+Expose metrics for feature traffic.
+
+Goals:
+
+* feature distribution metrics
+* latency breakdowns
+* OpenTelemetry support
+
+## v0.5 — Registry integrations
+
+Integrate with external feature registries.
+
+Goals:
+
+* Feast registry integration
+* schema versioning
+
+## v0.6 — Streaming adapters
+
+Add real‑time feature sources.
+
+Goals:
+
+* Kafka adapter
+* streaming feature ingestion
+
+## v1.0 — Production readiness
+
+Stabilize APIs and deployment model.
+
+Goals:
+
+* horizontal scaling
+* multi‑tenant support
+* performance benchmarks
+
+---
+
+# Contributing
+
+Contributions and experiments are welcome.
+
+Please open issues or pull requests if you would like to help shape the project.
+
+---
+
+# License
+
+Apache 2.0

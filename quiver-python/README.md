@@ -1,126 +1,210 @@
 # Quiver Python Client
 
-High-performance Python client for the [Quiver](https://github.com/quiver-ai/quiver) feature serving system. Provides zero-copy Arrow integration for ML inference pipelines that need fast, reliable feature retrieval.
+High‑performance Python client for the Quiver feature serving system. The client provides a convenient interface for retrieving features from a Quiver server and converting them into formats commonly used in machine learning pipelines.
 
-**Key Features:**
-- Zero-copy data transfer with Apache Arrow
-- Automatic retries and connection management  
-- ML framework exports (pandas, PyTorch, TensorFlow, Polars)
-- Batch requests with parallel execution
-- Point-in-time feature queries
+Internally, feature data is transported as Apache Arrow RecordBatches and can be exported into multiple ML frameworks with minimal overhead.
 
+---
 
-## Prerequisites
+# Overview
 
-- **You need a running Quiver server to use this client.** See the [Quiver documentation](https://github.com/quiver-ai/quiver) for installation and setup instructions.
-- Python >=3.10
+The Quiver Python client connects to a running Quiver server and allows applications to retrieve feature data using a simple API.
 
-## Installation
+Typical usage pattern:
 
-### Core Installation
-```bash
+1. Connect to a Quiver server
+2. Request features for one or more entities
+3. Convert the returned Arrow batch into a format suitable for model inference
+
+The client is designed for inference workloads where low latency, batching, and reliability are important.
+
+---
+
+# Key Features
+
+## Arrow‑native feature retrieval
+
+Feature data is returned from the server as Arrow RecordBatches, enabling efficient columnar processing and fast conversion to other data formats.
+
+## Batch requests
+
+Multiple feature requests can be executed in parallel through a single client call, reducing network round‑trips and improving throughput.
+
+## ML framework integrations
+
+Returned feature batches can be converted into formats compatible with common ML frameworks.
+
+Supported exports include:
+
+* pandas DataFrame
+* NumPy arrays
+* PyTorch tensors
+* TensorFlow tensors
+* Polars DataFrame
+
+## Automatic retries
+
+The client automatically retries transient failures and manages connection lifecycle.
+
+## Point‑in‑time queries
+
+When supported by the backend, features can be requested as they existed at a specific timestamp.
+
+---
+
+# Prerequisites
+
+* Python 3.10 or newer
+* A running Quiver server
+
+Refer to the main Quiver repository for server installation and configuration instructions.
+
+---
+
+# Installation
+
+## Core Installation
+
+```
 uv add quiver-client
-# Includes: grpcio-tools, pyarrow
 ```
 
-### Optional ML Framework Support
-```bash
-# Individual frameworks
-uv add quiver-client[pandas]      # pandas>=1.5.0
-uv add quiver-client[numpy]       # numpy>=1.21.0  
-uv add quiver-client[torch]       # torch>=1.12.0
-uv add quiver-client[tensorflow]  # tensorflow>=2.9.0
-uv add quiver-client[polars]      # polars>=0.18.0
+This installs the core dependencies required for feature retrieval.
 
-# Multiple frameworks
+---
+
+## Optional ML Framework Support
+
+Install optional integrations depending on your workflow.
+
+```
+uv add quiver-client[pandas]
+uv add quiver-client[numpy]
+uv add quiver-client[torch]
+uv add quiver-client[tensorflow]
+uv add quiver-client[polars]
+```
+
+Multiple integrations can be installed together.
+
+```
 uv add quiver-client[pandas,torch]
 ```
 
-## Usage Examples
+---
 
-*Note: All examples assume you have a Quiver server running on `localhost:8815`. Adjust the address as needed for your setup.*
+# Core Concepts
 
-### Basic Feature Retrieval
+## FeatureBatch
 
-```python
+The `get_features` API returns a `FeatureBatch` object.
+
+A `FeatureBatch` is a lightweight wrapper around an Arrow RecordBatch that provides convenient export methods for common ML frameworks.
+
+Example conversions:
+
+```
+features.to_pandas()
+features.to_numpy()
+features.to_torch()
+features.to_tensorflow()
+features.to_polars()
+features.to_arrow()
+```
+
+All conversions originate from the same underlying Arrow batch.
+
+---
+
+# Basic Usage
+
+```
 import quiver
 
-# Connect to Quiver server
 client = quiver.Client("localhost:8815")
 
-# Get features for entities
 features = client.get_features(
     feature_view="user_features",
-    entities=["user_123", "user_456"], 
+    entities=["user_123", "user_456"],
     features=["age", "tier", "total_orders"]
 )
 
-# Convert to pandas for ML workflows
-df = features.to_pandas()
-print(df)
-#    entity_id  age tier  total_orders
-# 0    user_123   25  gold           42
-# 1    user_456   31  silver         18
+print(features.to_pandas())
 
 client.close()
 ```
 
+---
 
-### Batch Requests
+# Batch Requests
 
-```python
-# Multiple requests in parallel
+Batch requests allow multiple feature views to be retrieved in parallel with a single network round‑trip.
+
+```
+import quiver
+
 requests = [
     quiver.FeatureRequest(
-        feature_view="user_features", 
+        feature_view="user_features",
         entities=["user_123", "user_456"],
         features=["age", "tier"]
     ),
     quiver.FeatureRequest(
         feature_view="item_features",
-        entities=["item_789"], 
+        entities=["item_789"],
         features=["category", "price"]
     )
 ]
 
 results = client.get_features_batch(requests)
-for i, result in enumerate(results):
-    print(f"Request {i}: {len(result)} rows")
+
+for result in results:
+    print(len(result))
 ```
 
-### Exporting to other formats
+---
 
-```python
-client = ...
+# Exporting Feature Data
+
+Returned features can be exported into several formats depending on the ML stack used.
+
+```
 features = client.get_features(
     feature_view="user_features",
     entities=["user_123"],
     features=["age", "tier", "total_orders"]
 )
 
-# pandas DataFrame
-df = features.to_pandas()
+# pandas
+features.to_pandas()
 
-# PyTorch tensor
-tensor = features.to_torch(columns=["age", "total_orders"])
+# NumPy
+features.to_numpy(columns=["age", "total_orders"])
 
-# TensorFlow tensor  
-tf_tensor = features.to_tensorflow(columns=["age", "total_orders"])
+# PyTorch
+features.to_torch(columns=["age", "total_orders"])
 
-# Polars DataFrame
-polars_df = features.to_polars()
+# TensorFlow
+features.to_tensorflow(columns=["age", "total_orders"])
 
-# NumPy array
-array = features.to_numpy(columns=["age", "total_orders"])
+# Polars
+features.to_polars()
+
+# Arrow
+features.to_arrow()
 ```
 
-### Point-in-Time Queries
+---
 
-```python
+# Point‑in‑Time Queries
+
+Some backends support retrieving features as they existed at a specific timestamp.
+
+Example:
+
+```
 from datetime import datetime
 
-client = ...
-# Get features as they existed at a specific time
 features = client.get_features(
     feature_view="user_features",
     entities=["user_123"],
@@ -129,207 +213,183 @@ features = client.get_features(
 )
 ```
 
-### Context Manager Usage
+Support for point‑in‑time queries depends on the capabilities of the underlying backend.
 
-```python
-# Automatic connection cleanup
+---
+
+# Context Manager Usage
+
+The client supports context manager syntax for automatic cleanup.
+
+```
 import quiver
+
 with quiver.Client("localhost:8815") as client:
     features = client.get_features(
         feature_view="user_features",
         entities=["user_123"],
         features=["age", "tier"]
     )
+
     df = features.to_pandas()
-    # Client automatically closed
 ```
 
-## Configuration
+---
 
-### Client Options
+# Client Configuration
 
-```python
-import quiver
+```
 client = quiver.Client(
     address="localhost:8815",
-    timeout=30.0,                    # Request timeout in seconds
-    max_retries=3,                   # Number of retry attempts
-    compression="gzip",              # Optional compression (gzip, zstd)
-    default_null_strategy="fill_null", # How to handle missing values
-    validate_connection=True         # Test connection on startup
+    timeout=30.0,
+    max_retries=3,
+    compression="gzip",
+    default_null_strategy="fill_null",
+    validate_connection=True
 )
 ```
 
-### Advanced Request Options
+Configuration options:
 
-```python
-import quiver
-features = client.get_features(
-    feature_view="user_features",
-    entities=["user_123"],
-    features=["age", "tier"],
-    include_timestamps=True,         # Include feature timestamps
-    include_freshness=True,          # Include freshness metadata  
-    null_strategy="error",           # Override default null handling
-    context=quiver.RequestContext(   # Request tracing context
-        request_id="req-123",
-        caller="ml-service",
-        environment="production"
-    ),
-    timeout=60.0                     # Override default timeout
-)
+* `timeout` — request timeout in seconds
+* `max_retries` — retry attempts for transient errors
+* `compression` — response compression (gzip or zstd)
+* `default_null_strategy` — how missing feature values are handled
+* `validate_connection` — test server connectivity on startup
+
+---
+
+# Discovering Feature Views
+
+The client can list feature views registered in the server.
+
 ```
-
-### List Available Feature Views
-
-```python
-# Discover available feature views
-client = ...
 views = client.list_feature_views()
 
 for view in views:
-    print(f"View: {view.name}")
-    print(f"Backend: {view.backend}")
-    print(f"Schema: {view.schema}")
-    print(f"Entity types: {view.entity_types}")
+    print(view.name)
+    print(view.schema)
 ```
 
-## E2E Integration Examples
+---
 
-### Inference Pipeline
+# Inference Pipeline Example
 
-```python
-import quiver
+```
+import torch
 import torch.nn as nn
+import quiver
 
-class MLModel:
-    def __init__(self, quiver_client):
-        self.client = quiver_client
+class ModelService:
+
+    def __init__(self, client):
+        self.client = client
         self.model = self.load_model()
-    
+
+    def load_model(self):
+        return nn.Linear(3, 1)
+
     def predict(self, entity_ids):
-        # Fetch features from Quiver
+
         features = self.client.get_features(
             feature_view="user_features",
             entities=entity_ids,
             features=["age", "tier_encoded", "total_orders"]
         )
-        
-        # Convert to PyTorch tensor
-        input_tensor = features.to_torch(
+
+        tensor = features.to_torch(
             columns=["age", "tier_encoded", "total_orders"]
         )
-        
-        # Run inference
+
         with torch.no_grad():
-            predictions = self.model(input_tensor)
-            
-        return predictions.numpy()
+            predictions = self.model(tensor)
 
-# Usage
+        return predictions
+
 with quiver.Client("localhost:8815") as client:
-    model = MLModel(client)
-    predictions = model.predict(["user_123", "user_456"])
+    service = ModelService(client)
+    preds = service.predict(["user_123", "user_456"])
 ```
 
-### Feature Store Enrichment
+---
 
-```python
-import quiver
-import pandas as pd
+# Error Handling
 
-def enrich_dataset(entity_ids, feature_views):
-    """Enrich a dataset with features from multiple views."""
-    
-    with quiver.Client("localhost:8815") as client:
-        requests = []
-        for view_name, features in feature_views.items():
-            requests.append(quiver.FeatureRequest(
-                feature_view=view_name,
-                entities=entity_ids,
-                features=features
-            ))
-        
-        results = client.get_features_batch(requests)
-        
-        combined_df = None
-        for result in results:
-            df = result.to_pandas()
-            if combined_df is None:
-                combined_df = df
-            else:
-                combined_df = combined_df.merge(df, on="entity_id", how="outer")
-                
-        return combined_df
+Common exceptions raised by the client:
 
-enriched_data = enrich_dataset(
-    entity_ids=["user_123", "user_456", "user_789"],
-    feature_views={
-        "user_features": ["age", "tier", "total_orders"],
-        "user_preferences": ["category_affinity", "price_sensitivity"],
-        "user_behavior": ["last_login", "session_count"]
-    }
-)
+* `QuiverConnectionError`
+* `QuiverFeatureViewNotFound`
+* `QuiverFeatureNotFound`
+* `QuiverTimeoutError`
+* `QuiverValidationError`
+* `QuiverServerError`
+
+Example:
+
 ```
-
-## Error Handling
-
-### Exception Types
-
-```python
 import quiver
 
 try:
+
     client = quiver.Client("localhost:8815")
-    features = client.get_features("user_features", ["user_123"], ["age"])
-    
+
+    features = client.get_features(
+        "user_features",
+        ["user_123"],
+        ["age"]
+    )
+
 except quiver.QuiverConnectionError:
-    print("Cannot connect to Quiver server")
-    
+    print("Cannot connect to server")
+
 except quiver.QuiverFeatureViewNotFound:
-    print("Feature view 'user_features' does not exist")
-    
-except quiver.QuiverFeatureNotFound as e:
-    print(f"Features not found: {e.missing_features}")
-    
+    print("Unknown feature view")
+
 except quiver.QuiverTimeoutError:
     print("Request timed out")
-    
+
 finally:
     client.close()
 ```
 
-### Common Issues
+---
 
-| Exception | Cause | Solution |
-|-----------|-------|----------|
-| `QuiverConnectionError` | Cannot reach server | Check server address and network |
-| `QuiverFeatureViewNotFound` | Feature view doesn't exist | Verify feature view name |
-| `QuiverFeatureNotFound` | One or more features missing | Check available features |
-| `QuiverValidationError` | Invalid request parameters | Validate input data |
-| `QuiverTimeoutError` | Request took too long | Increase timeout or reduce batch size |
-| `QuiverServerError` | Server-side error | Check server logs |
+# Performance Tips
 
-### Troubleshooting
+## Reuse client instances
 
-```python
-# Test basic connectivity
-try:
-    client = quiver.Client("localhost:8815", validate_connection=True)
-    print("Connection successful")
-except quiver.QuiverConnectionError as e:
-    print(f"Connection failed: {e}")
+Create one client per service rather than reconnecting on every request.
 
-# Check available features
-views = client.list_feature_views()
-for view in views:
-    print(f"{view.name}: {view.schema.names}")
-
-# Performance tuning for high-throughput
-client = quiver.Client(
-    address="localhost:8815",
-    timeout=120.0,        # Longer timeout for large batches
-    max_retries=5,        # More retries for reliability
-    compression="zstd"    # Better compression for large responses
-)
 ```
+client = quiver.Client("localhost:8815")
+```
+
+## Prefer batch requests
+
+Fetching many entities in a single request is significantly more efficient than issuing many small requests.
+
+## Tune request timeouts
+
+Large batch requests may require longer timeouts depending on backend latency.
+
+---
+
+# Troubleshooting
+
+Test server connectivity:
+
+```
+client = quiver.Client("localhost:8815", validate_connection=True)
+```
+
+List available feature views:
+
+```
+views = client.list_feature_views()
+
+for view in views:
+    print(view.name, view.schema)
+```
+
+---
+

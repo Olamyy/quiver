@@ -100,11 +100,11 @@ check: .protoc
 
 .PHONY: run
 run: .protoc 
-	cd quiver-core && cargo run
+	cd quiver-core && cargo run $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: run-release
 run-release: .protoc 
-	cd quiver-core && cargo run --release
+	cd quiver-core && cargo run --release $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: quality
 quality: format lint 
@@ -115,31 +115,3 @@ ci-check:
 	cd quiver-core && cargo clippy --all-features -- -D warnings
 	cd quiver-core && cargo test --all-features
 
-.PHONY: redis-start
-redis-start: 
-	@command -v redis-server > /dev/null || echo 'Please install Redis: https://redis.io/download'
-	redis-server --port 6379 --daemonize yes
-
-.PHONY: redis-stop
-redis-stop: 
-	redis-cli shutdown || echo 'Redis server not running or already stopped'
-
-.PHONY: redis-seed
-redis-seed: 
-	python3 seed_redis.py
-
-.PHONY: main
-main: quality test 
-
-.PHONY: help
-help: 
-	@echo "Usage: make [recipe]"
-	@echo "Recipes:"
-	@awk '/^[a-zA-Z0-9_-]+:.*?##/ { \
-	    helpMessage = match($$0, /## (.*)/); \
-	        if (helpMessage) { \
-	            recipe = $$1; \
-	            sub(/:/, "", recipe); \
-	            printf "  \033[36mmake %-20s\033[0m %s\n", recipe, substr($$0, RSTART + 3, RLENGTH); \
-	    } \
-	}' $(MAKEFILE_LIST)

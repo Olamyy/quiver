@@ -1,5 +1,5 @@
 [project]
-name = "quiver-client"
+name = "quiver-python"
 version = "0.1.0"
 description = "Python client for Quiver gRPC server"
 readme = "README.md"
