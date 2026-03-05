@@ -33,6 +33,19 @@ pub struct ServerConfig {
     pub max_message_size_mb: Option<usize>,
     pub compression: Option<Compression>,
     pub timeout_seconds: Option<u64>,
+    pub access_log: Option<AccessLogConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AccessLogConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_log_format")]
+    pub format: String,
+    #[serde(default = "default_false")]
+    pub include_request_body: bool,
+    #[serde(default = "default_true")]
+    pub include_response_metadata: bool,
 }
 
 fn default_host() -> String {
@@ -41,6 +54,14 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     8815
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn default_log_format() -> String {
+    "json".to_string()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -1,0 +1,33 @@
+[project]
+name = "quiver-benchmarks"
+version = "0.1.0"
+description = "Python benchmarks for Quiver feature serving performance"
+requires-python = ">=3.10"
+dependencies = [
+    "redis>=5.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "httpx>=0.25.0",
+    "psutil>=5.9.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pandas>=1.5.0",
+    "numpy>=1.21.0",
+    "quiver-python",
+    "grpcio>=1.78.0",
+]
+
+[tool.uv.sources]
+quiver-python = { path = "../../quiver-python", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.4.0",
+]
+
+[tool.ruff]
+exclude = ["__pycache__/"]

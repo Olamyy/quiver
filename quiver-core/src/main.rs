@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let server = QuiverFlightServer::new(resolver);
+    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone());
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
