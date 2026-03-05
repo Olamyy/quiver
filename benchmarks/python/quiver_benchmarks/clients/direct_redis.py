@@ -40,7 +40,7 @@ class DirectRedisBinaryClient(DirectRedisClient):
         self, entity_ids: List[str], feature_names: List[str]
     ) -> Dict[str, Dict[str, Any]]:
         """Get features using binary format for efficient storage/retrieval"""
-        start_time = time.time()
+        time.time()
 
         try:
             results = {}
@@ -104,7 +104,7 @@ class DirectRedisJSONClient(DirectRedisClient):
         self, entity_ids: List[str], feature_names: List[str]
     ) -> Dict[str, Dict[str, Any]]:
         """Get features using JSON format (most common current approach)"""
-        start_time = time.time()
+        time.time()
 
         try:
             results = {}

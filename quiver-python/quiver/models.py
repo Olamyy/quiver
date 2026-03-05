@@ -70,7 +70,7 @@ class FeatureViewInfo:
     """Information about a feature view."""
 
     name: str
-    schema: pa.Schema # noqa
+    schema: pa.Schema  # noqa
     backend: str
     entity_types: List[str]
 

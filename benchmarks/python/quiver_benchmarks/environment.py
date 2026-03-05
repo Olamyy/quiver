@@ -55,12 +55,12 @@ def get_cpu_info() -> str:
 def get_redis_version(host: str = "localhost", port: int = 6379) -> Optional[str]:
     """Get Redis server version"""
     try:
-        import redis # noqa: F401
+        import redis  # noqa: F401
 
         client = redis.Redis(host=host, port=port, socket_connect_timeout=2)
         info = client.info()
         return info.get("redis_version")
-    except Exception: # noqa
+    except Exception:  # noqa
         return None
 
 

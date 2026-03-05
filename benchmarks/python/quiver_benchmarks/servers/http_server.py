@@ -94,7 +94,7 @@ async def get_features(request: FeatureRequest):
 
             features[entity_id] = entity_features
 
-        duration_ms = (time.time() - start_time) * 1000
+        (time.time() - start_time) * 1000
 
         return FeatureResponse(features=features)
 

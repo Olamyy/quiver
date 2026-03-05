@@ -3,7 +3,6 @@
 import asyncio
 import json
 import random
-import struct
 import time
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from .config import BenchmarkConfig, BenchmarkMethod, LoadPattern, SCENARIOS
+from .config import BenchmarkConfig, BenchmarkMethod, SCENARIOS
 from .environment import detect_environment, print_environment_info
 from .models import BenchmarkResults, PerformanceMetrics, DataPoint
 from .clients.direct_redis import (
