@@ -40,7 +40,7 @@ registry:
           source: "redis_cache"
         
         - name: "is_online"
-          arrow_type: "boolean"
+          arrow_type: "bool"
           nullable: true
           source: "redis_cache"
     

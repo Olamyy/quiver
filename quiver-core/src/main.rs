@@ -16,6 +16,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Path to configuration file. Can also be set via QUIVER_CONFIG environment variable.
     #[arg(short, long)]
     config: Option<String>,
 }
@@ -29,8 +30,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args = Args::parse();
-    let cfg = config::Config::load(args.config.as_deref())?;
 
+    let config_path = args.config.or_else(|| std::env::var("QUIVER_CONFIG").ok());
+
+    if let Some(ref path) = config_path {
+        tracing::info!("Loading configuration from: {}", path);
+    } else {
+        tracing::info!("Loading configuration from default search paths");
+    }
+
+    let cfg = config::Config::load(config_path.as_deref())?;
+    run_with_config(cfg).await
+}
+
+async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::Error>> {
     if cfg.adapters.is_empty() {
         return Err("Configuration error: No adapters defined".into());
     }
@@ -84,10 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match adapter_cfg {
             config::AdapterConfig::Memory => {
                 let adapter = Arc::new(MemoryAdapter::new());
-                resolver.register_adapter(
-                    name,
-                    adapter as Arc<dyn quiver_core::adapters::BackendAdapter>,
-                );
+                resolver.register_adapter(name, adapter as Arc<dyn BackendAdapter>);
             }
             config::AdapterConfig::Redis {
                 connection,
@@ -96,10 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 let adapter =
                     RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
-                resolver.register_adapter(
-                    name,
-                    Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,
-                );
+                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
             }
             config::AdapterConfig::Postgres {
                 connection_string,
@@ -116,13 +123,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?;
 
-                // Initialize the adapter
                 adapter.initialize().await?;
 
-                resolver.register_adapter(
-                    name,
-                    Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,
-                );
+                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
             }
         }
     }

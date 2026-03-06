@@ -47,7 +47,7 @@ registry:
           source: "redis_realtime"
         
         - name: "is_authenticated"
-          arrow_type: "boolean"
+          arrow_type: "bool"
           nullable: true
           source: "redis_realtime"
         

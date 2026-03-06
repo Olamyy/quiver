@@ -209,23 +209,62 @@ impl FlightService for QuiverFlightServer {
         &self,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<SchemaResult>, Status> {
+        let start_time = std::time::Instant::now();
         let descriptor = request.into_inner();
         let view_name = descriptor.path.first().ok_or_else(|| {
             Status::invalid_argument("FlightDescriptor must contain a path for the feature view")
         })?;
 
-        let schema = self
-            .resolver
-            .get_arrow_schema(view_name)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to resolve schema: {}", e)))?;
+        match self.resolver.get_arrow_schema(view_name).await {
+            Ok(schema) => {
+                let field_count = schema.fields().len();
 
-        let options = arrow::ipc::writer::IpcWriteOptions::default();
-        let schema_result: SchemaResult = arrow_flight::SchemaAsIpc::new(&schema, &options)
-            .try_into()
-            .map_err(|e| Status::internal(format!("Failed to serialize schema: {}", e)))?;
-
-        Ok(Response::new(schema_result))
+                let options = arrow::ipc::writer::IpcWriteOptions::default();
+                match arrow_flight::SchemaAsIpc::new(&schema, &options).try_into() {
+                    Ok(schema_result) => {
+                        let duration = start_time.elapsed();
+                        self.log_request(AccessLogData {
+                            endpoint: "get_schema",
+                            feature_view: Some(view_name),
+                            entity_count: None,
+                            feature_count: Some(field_count),
+                            duration,
+                            status: "success",
+                            error: None,
+                        });
+                        Ok(Response::new(schema_result))
+                    }
+                    Err(e) => {
+                        let duration = start_time.elapsed();
+                        let error_msg = format!("Failed to serialize schema: {}", e);
+                        self.log_request(AccessLogData {
+                            endpoint: "get_schema",
+                            feature_view: Some(view_name),
+                            entity_count: None,
+                            feature_count: Some(field_count),
+                            duration,
+                            status: "error",
+                            error: Some(&error_msg),
+                        });
+                        Err(Status::internal(error_msg))
+                    }
+                }
+            }
+            Err(e) => {
+                let duration = start_time.elapsed();
+                let error_msg = format!("Failed to resolve schema: {}", e);
+                self.log_request(AccessLogData {
+                    endpoint: "get_schema",
+                    feature_view: Some(view_name),
+                    entity_count: None,
+                    feature_count: None,
+                    duration,
+                    status: "error",
+                    error: Some(&error_msg),
+                });
+                Err(Status::internal(error_msg))
+            }
+        }
     }
 
     type DoGetStream = Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>;

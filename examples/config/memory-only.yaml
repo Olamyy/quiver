@@ -45,7 +45,7 @@ registry:
           source: "memory"
         
         - name: "is_premium"
-          arrow_type: "boolean"
+          arrow_type: "bool"
           nullable: true
           source: "memory"
 
