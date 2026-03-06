@@ -4,6 +4,11 @@
 server:
   host: "0.0.0.0" 
   port: 8815
+
+  # TLS disabled for development
+#  tls:
+#     cert_path: "/etc/ssl/certs/quiver.pem"
+#     key_path: "/etc/ssl/private/quiver.key"
   
   # High-performance settings for real-time inference
   max_concurrent_rpcs: 5000
@@ -67,13 +72,21 @@ registry:
 adapters:
   redis_cache:
     type: redis
-    # Secure Redis connection - use environment variable for password
+    connection: "redis://:quiver_dev_redis_password@127.0.0.1:6379"
     # QUIVER__ADAPTERS__REDIS_CACHE__PASSWORD="your_redis_password"
-    connection: "rediss://cache.example.com:6380"  # TLS-enabled Redis
     key_template: "features:user:{entity}:feature:{feature}"
+    # TLS configuration (uncomment for production with TLS-enabled Redis)
+    # tls:
+    #   verify_certificates: true
+    #   ca_cert_path: "/etc/ssl/redis-ca.pem"
+    #   client_cert_path: "/etc/ssl/redis-client.pem"
+    #   client_key_path: "/etc/ssl/redis-client.key"
   
   redis_recommendations:
     type: redis
-    connection: "rediss://recommendations.example.com:6380"
+    connection: "redis://127.0.0.1:6379"
     # Custom key template for recommendation data
     key_template: "ml:recommendations:{entity}:{feature}"
+    # Example: TLS without certificate verification (for testing)
+    # tls:
+    #   verify_certificates: false

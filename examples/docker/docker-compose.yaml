@@ -1,7 +1,6 @@
 # Docker Compose setup for Quiver development and testing
 # Provides PostgreSQL and Redis instances for example configurations
 
-version: '3.8'
 
 services:
   # PostgreSQL for feature storage
@@ -49,21 +48,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # Optional: PostgreSQL admin interface
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@quiver.dev
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_DISABLE_POSTFIX: "true"
-    ports:
-      - "8080:80"
-    depends_on:
-      - postgres
-    profiles:
-      - admin
-
-  # Optional: Redis admin interface
   redis-commander:
     image: rediscommander/redis-commander:latest
     environment:

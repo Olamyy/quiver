@@ -5,6 +5,7 @@ use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row, postgres::PgRow};
+use tracing::info;
 
 use super::utils::{ScalarValue, build_record_batch, validation};
 use super::{AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, TemporalCapability};
@@ -31,20 +32,27 @@ impl PostgresAdapter {
     /// Create a new PostgreSQL adapter.
     ///
     /// # Arguments
-    /// * `connection_string` - PostgreSQL connection string (must include TLS configuration)
+    /// * `connection_string` - PostgreSQL connection string (will be modified based on TLS config)
     /// * `table_template` - Template for table names (e.g., "features_{feature}")
     /// * `max_connections` - Maximum connections in pool
     /// * `timeout` - Default timeout for operations
+    /// * `tls_config` - Optional TLS configuration
     ///
     /// # Security
     /// Connection strings are validated to ensure secure TLS connections.
+    /// TLS configuration takes precedence over connection string SSL settings.
     pub async fn new(
         connection_string: &str,
         table_template: &str,
         max_connections: Option<u32>,
         timeout: Option<Duration>,
+        tls_config: Option<&crate::config::AdapterTlsConfig>,
     ) -> Result<Self, AdapterError> {
         Self::validate_connection_security(connection_string)?;
+
+        // Modify connection string based on TLS configuration
+        let effective_connection_string =
+            Self::build_connection_string_with_tls(connection_string, tls_config)?;
 
         let mut options = sqlx::postgres::PgPoolOptions::new();
 
@@ -65,9 +73,14 @@ impl PostgresAdapter {
             .max_lifetime(Some(Duration::from_secs(1800)));
 
         let pool = options
-            .connect(connection_string)
+            .connect(&effective_connection_string)
             .await
             .map_err(|e| AdapterError::connection_failed(BACKEND_NAME, e.to_string()))?;
+
+        info!(
+            "Successfully connected to PostgreSQL database with {} max connections",
+            max_connections.unwrap_or(20)
+        );
 
         Ok(Self {
             pool,
@@ -83,45 +96,126 @@ impl PostgresAdapter {
     /// Ensures that the connection uses secure TLS settings and doesn't expose
     /// credentials in an insecure manner.
     fn validate_connection_security(connection_string: &str) -> Result<(), AdapterError> {
-        let has_ssl_require = connection_string.contains("sslmode=require");
-        let has_ssl_verify_ca = connection_string.contains("sslmode=verify-ca");
-        let has_ssl_verify_full = connection_string.contains("sslmode=verify-full");
-        let has_ssl_disabled = connection_string.contains("sslmode=disable");
-        let has_ssl_allow = connection_string.contains("sslmode=allow");
-        let has_ssl_prefer = connection_string.contains("sslmode=prefer");
-
-        if has_ssl_disabled {
-            return Err(AdapterError::invalid(
-                BACKEND_NAME,
-                "Connection string explicitly disables SSL with 'sslmode=disable'. This is not allowed for security reasons.",
-            ));
-        }
-
-        if !has_ssl_require
-            && !has_ssl_verify_ca
-            && !has_ssl_verify_full
-            && (has_ssl_allow || has_ssl_prefer || !connection_string.contains("sslmode="))
-        {
-            eprintln!(
-                "WARNING: PostgreSQL connection does not specify secure SSL mode. Consider using 'sslmode=require' or stronger for production."
-            );
-        }
-
-        if connection_string.is_empty() {
+        if connection_string.trim().is_empty() {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
                 "Connection string cannot be empty",
             ));
         }
-
         if connection_string.len() > 2048 {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
-                "Connection string is too long (max 2048 characters)",
+                "Connection string is too long",
             ));
         }
 
+        let settings: Vec<(&str, &str)> = connection_string
+            .split_whitespace()
+            .filter_map(|s| {
+                let mut parts = s.splitn(2, '=');
+                Some((parts.next()?, parts.next()?))
+            })
+            .collect();
+
+        let ssl_mode = settings
+            .iter()
+            .find(|(k, _)| *k == "sslmode")
+            .map(|(_, v)| *v);
+
+        match ssl_mode {
+            Some("disable") => {
+                return Err(AdapterError::invalid(
+                    BACKEND_NAME,
+                    "SSL is explicitly disabled. This is not allowed.",
+                ));
+            }
+            Some("require") | Some("verify-ca") | Some("verify-full") => {}
+            _ => {
+                eprintln!(
+                    "WARNING: PostgreSQL connection does not specify secure SSL mode. Defaulting to insecure fallback."
+                );
+            }
+        }
+
         Ok(())
+    }
+
+    /// Build connection string with TLS configuration applied.
+    ///
+    /// This method modifies the connection string to apply TLS settings based on:
+    /// 1. Explicit TLS configuration (takes precedence)
+    /// 2. Query parameters in the connection string
+    /// 3. Existing sslmode settings (fallback)
+    fn build_connection_string_with_tls(
+        connection_string: &str,
+        tls_config: Option<&crate::config::AdapterTlsConfig>,
+    ) -> Result<String, AdapterError> {
+        use std::collections::HashMap;
+
+        // Parse the connection string
+        let mut params = HashMap::new();
+        let mut base_url = connection_string;
+
+        // Extract query parameters if present
+        if let Some(query_start) = connection_string.find('?') {
+            base_url = &connection_string[..query_start];
+            let query_str = &connection_string[query_start + 1..];
+
+            for param in query_str.split('&') {
+                if let Some((key, value)) = param.split_once('=') {
+                    params.insert(key.to_string(), value.to_string());
+                }
+            }
+        }
+
+        // Apply TLS configuration
+        if let Some(tls_cfg) = tls_config {
+            // TLS configuration provided - override SSL settings
+            let verify_certs = tls_cfg.should_verify_certificates(connection_string);
+
+            if verify_certs {
+                params.insert("sslmode".to_string(), "require".to_string());
+            } else {
+                params.insert("sslmode".to_string(), "require".to_string());
+                params.insert("sslcert".to_string(), "".to_string());
+                params.insert("sslkey".to_string(), "".to_string());
+                params.insert("sslrootcert".to_string(), "".to_string());
+            }
+
+            // Add certificate paths if provided
+            if let Some(ca_cert) = &tls_cfg.ca_cert_path {
+                params.insert("sslrootcert".to_string(), ca_cert.clone());
+            }
+            if let Some(client_cert) = &tls_cfg.client_cert_path {
+                params.insert("sslcert".to_string(), client_cert.clone());
+            }
+            if let Some(client_key) = &tls_cfg.client_key_path {
+                params.insert("sslkey".to_string(), client_key.clone());
+            }
+        } else if !params.contains_key("sslmode") {
+            // No TLS config provided, check if URL protocol suggests TLS
+            if crate::config::is_tls_enabled_by_protocol(connection_string) {
+                params.insert("sslmode".to_string(), "require".to_string());
+            }
+        }
+
+        // Rebuild connection string
+        if params.is_empty() {
+            Ok(connection_string.to_string())
+        } else {
+            let query_string: String = params
+                .iter()
+                .filter(|(_, v)| !v.is_empty()) // Skip empty values
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("&");
+
+            if query_string.is_empty() {
+                Ok(base_url.to_string())
+            } else {
+                Ok(format!("{}?{}", base_url, query_string))
+            }
+        }
     }
 
     /// Validate and sanitize identifier (table names, column names).
@@ -239,7 +333,6 @@ impl PostgresAdapter {
     }
 
     fn record_batch_entity_id_index(entity_ids: &[String]) -> HashMap<&str, usize> {
-        // We only need this map during the call, and entity_ids live long enough.
         entity_ids
             .iter()
             .enumerate()
@@ -482,6 +575,7 @@ mod tests {
             "test_features_{feature}",
             Some(5),
             Some(StdDuration::from_secs(10)),
+            None, // No TLS config for tests
         )
         .await
     }

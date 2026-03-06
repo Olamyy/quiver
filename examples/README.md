@@ -1,10 +1,12 @@
 # Quiver Configuration Examples
 
-This directory contains example configurations for different Quiver deployment scenarios. Each configuration demonstrates best practices for specific use cases.
+This directory contains example configurations for different Quiver deployment scenarios and client usage examples. Each example demonstrates best practices for specific use cases.
 
 ## Available Examples
 
-### [`memory-only.yaml`](config/memory-only.yaml)
+### Configuration Examples
+
+### [`memory-only.yaml`](config/memory.yaml)
 **Use Case**: Development, testing, and high-performance in-memory caching
 
 - **Adapters**: Memory only
@@ -14,7 +16,7 @@ This directory contains example configurations for different Quiver deployment s
   - Scenarios where features can fit in memory
 - **Limitations**: No persistence, limited by available RAM
 
-### [`postgres-production.yaml`](config/postgres-production.yaml)  
+### [`postgres-production.yaml`](config/postgres.yaml)  
 **Use Case**: Production deployments with persistent feature storage
 
 - **Adapters**: Multiple PostgreSQL databases
@@ -24,7 +26,7 @@ This directory contains example configurations for different Quiver deployment s
   - Multi-tenant feature serving
 - **Features**: TLS encryption, connection pooling, multiple data sources
 
-### [`redis-realtime.yaml`](config/redis-realtime.yaml)
+### [`redis-realtime.yaml`](config/redis.yaml)
 **Use Case**: Real-time ML inference with ultra-low latency
 
 - **Adapters**: Multiple Redis instances
@@ -209,7 +211,7 @@ export QUIVER__ADAPTERS__POSTGRES__CONNECTION_STRING="postgresql://..."
 make run
 
 # Test configuration validity
-cargo run -- --config examples/config/postgres-production.yaml --validate
+cargo run -- --config examples/config/postgres.yaml --validate
 ```
 
 ## Troubleshooting

@@ -28,10 +28,17 @@ impl RedisAdapter {
     /// `QUIVER_ADAPTERS__<ADAPTER_NAME>__PASSWORD=your_redis_password`
     ///
     /// If no password is provided, no authentication is used.
+    ///
+    /// # TLS Configuration
+    /// TLS support is determined by:
+    /// 1. Presence of tls_config parameter (explicit TLS configuration)
+    /// 2. Connection URL protocol (rediss:// enables TLS, redis:// disables TLS)
+    /// 3. Query parameters in URL (?tls_verify=false overrides certificate verification)
     pub async fn new(
         url: &str,
         password: Option<&str>,
         key_template: &str,
+        tls_config: Option<&crate::config::AdapterTlsConfig>,
     ) -> Result<Self, AdapterError> {
         if url.contains('@') && (url.starts_with("redis://") || url.starts_with("rediss://")) {
             return Err(AdapterError::invalid(
@@ -40,7 +47,27 @@ impl RedisAdapter {
             ));
         }
 
-        let client = redis::Client::open(url).map_err(|e| {
+        // Determine TLS settings
+        let tls_enabled = if let Some(tls_cfg) = tls_config {
+            // Explicit TLS config provided - TLS is enabled
+            tls_cfg.is_tls_enabled(url)
+        } else {
+            // No TLS config - check URL protocol
+            crate::config::is_tls_enabled_by_protocol(url)
+        };
+
+        // Convert URL to appropriate protocol based on TLS settings
+        let effective_url = if tls_enabled && url.starts_with("redis://") {
+            // Convert redis:// to rediss:// when TLS is explicitly enabled
+            url.replacen("redis://", "rediss://", 1)
+        } else if !tls_enabled && url.starts_with("rediss://") {
+            // Convert rediss:// to redis:// when TLS is explicitly disabled
+            url.replacen("rediss://", "redis://", 1)
+        } else {
+            url.to_string()
+        };
+
+        let client = redis::Client::open(effective_url.as_str()).map_err(|e| {
             AdapterError::internal("redis", format!("Failed to open Redis client: {}", e))
         })?;
 

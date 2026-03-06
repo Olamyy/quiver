@@ -282,10 +282,10 @@ Configuration precedence:
 
 The [`examples/`](examples/) directory contains configuration examples for different deployment scenarios:
 
-- **[`memory-only.yaml`](examples/config/memory-only.yaml)** - Development and high-performance in-memory caching
+- **[`memory-only.yaml`](examples/config/memory.yaml)** - Development and high-performance in-memory caching
 - **[`development.yaml`](examples/config/development.yaml)** - Local development with PostgreSQL + Redis
-- **[`postgres-production.yaml`](examples/config/postgres-production.yaml)** - Production with persistent feature storage
-- **[`redis-realtime.yaml`](examples/config/redis-realtime.yaml)** - Ultra-low latency real-time inference
+- **[`postgres.yaml`](examples/config/postgres.yaml)** - Production with persistent feature storage
+- **[`redis.yaml`](examples/config/redis.yaml)** - Ultra-low latency real-time inference
 - **[`hybrid-multi-adapter.yaml`](examples/config/hybrid-multi-adapter.yaml)** - Complex ML pipelines with mixed adapters
 
 ### Quick Start with Examples

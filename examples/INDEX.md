@@ -49,10 +49,10 @@ examples/
 
 | Configuration | Use Case | Adapters | Best For |
 |---------------|----------|----------|----------|
-| [`memory-only.yaml`](config/memory-only.yaml) | Development/Testing | Memory | Fast prototyping, unit tests |
+| [`memory-only.yaml`](config/memory.yaml) | Development/Testing | Memory | Fast prototyping, unit tests |
 | [`development.yaml`](config/development.yaml) | Local Development | PostgreSQL + Redis | Full-stack local development |
-| [`postgres-production.yaml`](config/postgres-production.yaml) | Production | PostgreSQL | Enterprise deployments with persistence |
-| [`redis-realtime.yaml`](config/redis-realtime.yaml) | Real-time Inference | Redis | Ultra-low latency serving (<5ms) |
+| [`postgres-production.yaml`](config/postgres.yaml) | Production | PostgreSQL | Enterprise deployments with persistence |
+| [`redis-realtime.yaml`](config/redis.yaml) | Real-time Inference | Redis | Ultra-low latency serving (<5ms) |
 | [`hybrid-multi-adapter.yaml`](config/hybrid-multi-adapter.yaml) | Complex ML | Memory + PostgreSQL + Redis | Multi-modal feature serving |
 
 ## Tools
@@ -126,38 +126,3 @@ open http://localhost:8080  # pgAdmin
 open http://localhost:8081  # Redis Commander
 ```
 
-## Learn More
-
-- **[Main README](../README.md)** - Project overview and getting started
-- **[Examples README](README.md)** - Detailed configuration documentation
-- **[Docker README](docker/README.md)** - Development environment setup
-- **Configuration files** - Inline comments explain each setting
-
-## Contributing
-
-When adding new examples:
-1. Follow naming convention: `{use-case}.yaml`
-2. Add comprehensive comments
-3. Include security recommendations  
-4. Update this index
-5. Test with validation script
-
-## Example Commands
-
-```bash
-# Validate all example configurations
-for config in examples/config/*.yaml; do
-  echo "Validating $config..."
-  ./examples/validate-config.sh "$config"
-done
-
-# Test configuration loading
-QUIVER_CONFIG="examples/config/memory-only.yaml" cargo check
-
-# Start with Docker databases
-cd examples/docker && docker-compose up -d
-cd ../.. && ./examples/quick-start.sh
-
-# Reset Docker environment  
-cd examples/docker && docker-compose down -v && docker-compose up -d
-```

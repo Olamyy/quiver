@@ -14,6 +14,16 @@ pub struct TlsConfig {
     pub key_path: String,
 }
 
+/// Universal TLS configuration for adapters
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AdapterTlsConfig {
+    #[serde(default = "default_true")]
+    pub verify_certificates: bool,
+    pub ca_cert_path: Option<String>,
+    pub client_cert_path: Option<String>,
+    pub client_key_path: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Compression {
@@ -93,6 +103,44 @@ fn default_true() -> bool {
     true
 }
 
+impl AdapterTlsConfig {
+    /// Determine if TLS should be enabled based on config and connection string.
+    ///
+    /// Logic:
+    /// 1. If TLS config exists, TLS is enabled
+    /// 2. If no TLS config, check protocol (rediss://, postgresql with sslmode, etc.)
+    pub fn is_tls_enabled(&self, _connection_string: &str) -> bool {
+        // If we have a TLS config section, TLS is enabled
+        true // The presence of this struct means TLS should be enabled
+    }
+
+    /// Get the effective certificate verification setting, considering query parameters.
+    ///
+    /// Query parameters like ?tls_verify=false can override the config setting.
+    pub fn should_verify_certificates(&self, connection_string: &str) -> bool {
+        // Check for query parameter override
+        if let Ok(url) = url::Url::parse(connection_string) {
+            for (key, value) in url.query_pairs() {
+                if key == "tls_verify" {
+                    return value.parse::<bool>().unwrap_or(self.verify_certificates);
+                }
+            }
+        }
+
+        // Fall back to config setting
+        self.verify_certificates
+    }
+}
+
+/// Helper function to determine if TLS should be enabled based on connection string protocol
+/// when no explicit TLS config is provided.
+pub fn is_tls_enabled_by_protocol(connection_string: &str) -> bool {
+    connection_string.starts_with("rediss://")
+        || connection_string.starts_with("grpcs://")
+        || connection_string.contains("sslmode=require")
+        || connection_string.contains("sslmode=prefer")
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AdapterConfig {
@@ -102,6 +150,7 @@ pub enum AdapterConfig {
         password: Option<String>,
         #[serde(default = "default_redis_template")]
         key_template: String,
+        tls: Option<AdapterTlsConfig>,
     },
     Postgres {
         connection_string: String,
@@ -109,6 +158,7 @@ pub enum AdapterConfig {
         table_template: String,
         max_connections: Option<u32>,
         timeout_seconds: Option<u64>,
+        tls: Option<AdapterTlsConfig>,
     },
 }
 
@@ -220,6 +270,7 @@ adapters:
             table_template,
             max_connections,
             timeout_seconds,
+            tls: _,
         } = config.adapters.get("postgres_adapter").unwrap()
         {
             assert_eq!(

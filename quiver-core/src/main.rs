@@ -103,9 +103,15 @@ async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::
                 connection,
                 password,
                 key_template,
+                tls,
             } => {
-                let adapter =
-                    RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
+                let adapter = RedisAdapter::new(
+                    &connection,
+                    password.as_deref(),
+                    &key_template,
+                    tls.as_ref(),
+                )
+                .await?;
                 resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
             }
             config::AdapterConfig::Postgres {
@@ -113,6 +119,7 @@ async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::
                 table_template,
                 max_connections,
                 timeout_seconds,
+                tls,
             } => {
                 let timeout = timeout_seconds.map(Duration::from_secs);
                 let mut adapter = PostgresAdapter::new(
@@ -120,6 +127,7 @@ async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::
                     &table_template,
                     max_connections,
                     timeout,
+                    tls.as_ref(),
                 )
                 .await?;
 

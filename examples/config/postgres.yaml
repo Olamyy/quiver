@@ -5,10 +5,10 @@ server:
   host: "0.0.0.0"
   port: 8815
   
-  # Production TLS configuration (recommended)
-  tls:
-    cert_path: "/etc/ssl/certs/quiver.pem"
-    key_path: "/etc/ssl/private/quiver.key"
+  # TLS disabled for development
+  # tls:
+  #   cert_path: "/etc/ssl/certs/quiver.pem"
+  #   key_path: "/etc/ssl/private/quiver.key"
   
   # Production performance settings
   max_concurrent_rpcs: 2000
@@ -17,7 +17,7 @@ server:
   compression: gzip
   
   access_log:
-    enabled: true
+    enabled: false
     format: "json"
     include_request_body: false
     include_response_metadata: true
@@ -77,17 +77,25 @@ registry:
 adapters:
   postgres_main:
     type: postgres
-    # Secure connection string - use environment variable for password
-    # QUIVER__ADAPTERS__POSTGRES_MAIN__CONNECTION_STRING="postgresql://user:password@db.example.com:5432/features?sslmode=require"
-    connection_string: "postgresql://quiver_user@localhost:5432/user_features?sslmode=require"
+    # Connection without SSL parameters - TLS controlled via tls section
+    connection_string: "postgresql://quiver_user:quiver_dev_password@127.0.0.1:5432/quiver_features"
     table_template: "user_features_{feature}"
     max_connections: 20
     timeout_seconds: 30
-  
+    # TLS configuration (uncomment for production)
+    # tls:
+    #   verify_certificates: true
+    #   ca_cert_path: "/etc/ssl/postgres-ca.pem"
+    #   client_cert_path: "/etc/ssl/postgres-client.pem"
+    #   client_key_path: "/etc/ssl/postgres-client.key"
+
   postgres_analytics:
     type: postgres
-    # Alternative connection for analytics database
-    connection_string: "postgresql://analytics_user@analytics-db.example.com:5432/ml_features?sslmode=require"
-    table_template: "analytics_{feature}"  
+    # Change this from analytics-db.example.com to 127.0.0.1
+    connection_string: "postgresql://quiver_user:quiver_dev_password@127.0.0.1:5432/quiver_features"
+    table_template: "user_features_{feature}"
     max_connections: 15
     timeout_seconds: 45
+    # Example: TLS without certificate verification (for development)
+    # tls:
+    #   verify_certificates: false

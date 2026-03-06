@@ -90,6 +90,10 @@ impl Resolver {
                     "int64" => arrow::datatypes::DataType::Int64,
                     "string" => arrow::datatypes::DataType::Utf8,
                     "bool" => arrow::datatypes::DataType::Boolean,
+                    "timestamp" => arrow::datatypes::DataType::Timestamp(
+                        arrow::datatypes::TimeUnit::Nanosecond,
+                        Some("UTC".into()),
+                    ),
                     "timestamp_ns" => arrow::datatypes::DataType::Timestamp(
                         arrow::datatypes::TimeUnit::Nanosecond,
                         Some("UTC".into()),
