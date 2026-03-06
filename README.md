@@ -280,7 +280,7 @@ Configuration precedence:
 
 ## Configuration Examples
 
-The [`examples/`](examples/) directory contains comprehensive configuration examples for different deployment scenarios:
+The [`examples/`](examples/) directory contains configuration examples for different deployment scenarios:
 
 - **[`memory-only.yaml`](examples/config/memory-only.yaml)** - Development and high-performance in-memory caching
 - **[`development.yaml`](examples/config/development.yaml)** - Local development with PostgreSQL + Redis
@@ -294,12 +294,6 @@ Use the interactive configuration selector:
 
 ```bash
 ./examples/quick-start.sh
-```
-
-Or validate an existing configuration:
-
-```bash
-./examples/validate-config.sh config/my-config.yaml
 ```
 
 ### Docker Development Environment

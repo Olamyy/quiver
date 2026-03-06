@@ -2,7 +2,7 @@
 
 This directory provides comprehensive configuration examples and tools for different Quiver deployment scenarios.
 
-## 📁 Directory Structure
+## Directory Structure
 
 ```
 examples/
@@ -23,7 +23,7 @@ examples/
     └── README.md                      # Docker setup documentation
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 1. **Choose a configuration interactively:**
    ```bash
@@ -45,7 +45,7 @@ examples/
    ./examples/validate-config.sh config/my-config.yaml
    ```
 
-## 📋 Configuration Examples
+## Configuration Examples
 
 | Configuration | Use Case | Adapters | Best For |
 |---------------|----------|----------|----------|
@@ -55,7 +55,7 @@ examples/
 | [`redis-realtime.yaml`](config/redis-realtime.yaml) | Real-time Inference | Redis | Ultra-low latency serving (<5ms) |
 | [`hybrid-multi-adapter.yaml`](config/hybrid-multi-adapter.yaml) | Complex ML | Memory + PostgreSQL + Redis | Multi-modal feature serving |
 
-## 🛠️ Tools
+## Tools
 
 ### Interactive Configuration Selector
 ```bash
@@ -84,7 +84,7 @@ docker-compose up -d  # Start PostgreSQL + Redis
 - Optional admin interfaces (pgAdmin, Redis Commander)
 - Ready-to-use for development and testing
 
-## 🔧 Usage Patterns
+## Usage Patterns
 
 ### Environment-based Configuration
 ```bash
@@ -126,14 +126,14 @@ open http://localhost:8080  # pgAdmin
 open http://localhost:8081  # Redis Commander
 ```
 
-## 📖 Learn More
+## Learn More
 
 - **[Main README](../README.md)** - Project overview and getting started
 - **[Examples README](README.md)** - Detailed configuration documentation
 - **[Docker README](docker/README.md)** - Development environment setup
 - **Configuration files** - Inline comments explain each setting
 
-## 🤝 Contributing
+## Contributing
 
 When adding new examples:
 1. Follow naming convention: `{use-case}.yaml`
@@ -142,7 +142,7 @@ When adding new examples:
 4. Update this index
 5. Test with validation script
 
-## 📝 Example Commands
+## Example Commands
 
 ```bash
 # Validate all example configurations

@@ -4,7 +4,7 @@ This directory contains example configurations for different Quiver deployment s
 
 ## Available Examples
 
-### 🚀 [`memory-only.yaml`](config/memory-only.yaml)
+### [`memory-only.yaml`](config/memory-only.yaml)
 **Use Case**: Development, testing, and high-performance in-memory caching
 
 - **Adapters**: Memory only
@@ -14,7 +14,7 @@ This directory contains example configurations for different Quiver deployment s
   - Scenarios where features can fit in memory
 - **Limitations**: No persistence, limited by available RAM
 
-### 🏭 [`postgres-production.yaml`](config/postgres-production.yaml)  
+### [`postgres-production.yaml`](config/postgres-production.yaml)  
 **Use Case**: Production deployments with persistent feature storage
 
 - **Adapters**: Multiple PostgreSQL databases
@@ -24,7 +24,7 @@ This directory contains example configurations for different Quiver deployment s
   - Multi-tenant feature serving
 - **Features**: TLS encryption, connection pooling, multiple data sources
 
-### ⚡ [`redis-realtime.yaml`](config/redis-realtime.yaml)
+### [`redis-realtime.yaml`](config/redis-realtime.yaml)
 **Use Case**: Real-time ML inference with ultra-low latency
 
 - **Adapters**: Multiple Redis instances
@@ -34,7 +34,7 @@ This directory contains example configurations for different Quiver deployment s
   - High-throughput serving (5000+ concurrent requests)
 - **Features**: TLS connections, optimized for current-only features
 
-### 🔄 [`hybrid-multi-adapter.yaml`](config/hybrid-multi-adapter.yaml)
+### [`hybrid-multi-adapter.yaml`](config/hybrid-multi-adapter.yaml)
 **Use Case**: Production ML systems combining real-time and historical features
 
 - **Adapters**: Memory + Redis + PostgreSQL
@@ -44,7 +44,7 @@ This directory contains example configurations for different Quiver deployment s
   - Multi-modal feature serving
 - **Features**: Multiple feature views, optimized data routing
 
-### 🛠️ [`development.yaml`](config/development.yaml)
+### [`development.yaml`](config/development.yaml)
 **Use Case**: Local development and testing
 
 - **Adapters**: Local PostgreSQL + Redis
