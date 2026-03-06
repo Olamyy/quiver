@@ -218,7 +218,19 @@ impl PostgresAdapter {
         }
     }
 
-    /// Validate and sanitize identifier (table names, column names).
+    /// Get adapter capabilities without requiring a connection.
+    /// This is useful for testing and introspection.
+    pub fn static_capabilities() -> AdapterCapabilities {
+        AdapterCapabilities {
+            temporal: TemporalCapability::TimeTravel {
+                typical_latency_ms: 50,
+            },
+            max_batch_size: Some(1000),
+            optimal_batch_size: Some(100),
+            typical_latency_ms: 50,
+            supports_parallel_requests: true,
+        }
+    }
     ///
     /// Only allows alphanumeric characters and underscores, starting with letter or underscore.
     /// This prevents SQL injection through identifier manipulation.
@@ -348,15 +360,9 @@ impl BackendAdapter for PostgresAdapter {
     }
 
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            temporal: TemporalCapability::TimeTravel {
-                typical_latency_ms: 50,
-            },
-            max_batch_size: Some(self.max_batch_size),
-            optimal_batch_size: Some(100),
-            typical_latency_ms: 50,
-            supports_parallel_requests: true,
-        }
+        let mut caps = Self::static_capabilities();
+        caps.max_batch_size = Some(self.max_batch_size);
+        caps
     }
 
     async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError> {
@@ -623,15 +629,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_capabilities() {
-        let fake = PostgresAdapter {
-            pool: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
-            table_template: "x_{feature}".to_string(),
-            max_batch_size: 1000,
-            timeout_default: StdDuration::from_secs(30),
-            health_timeout: StdDuration::from_secs(3),
-        };
-
-        let caps = fake.capabilities();
+        let caps = PostgresAdapter::static_capabilities();
         assert!(matches!(
             caps.temporal,
             TemporalCapability::TimeTravel { .. }
@@ -639,7 +637,6 @@ mod tests {
         assert_eq!(caps.max_batch_size, Some(1000));
         assert_eq!(caps.optimal_batch_size, Some(100));
         assert!(caps.supports_parallel_requests);
-        std::mem::forget(fake);
     }
 
     #[tokio::test]
