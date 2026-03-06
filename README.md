@@ -470,6 +470,27 @@ Goals:
 
 ---
 
+# Security
+
+Quiver follows security best practices for ML infrastructure:
+
+- **Encrypted Connections**: TLS required for PostgreSQL, Redis, and gRPC in production
+- **Input Validation**: All entity IDs and feature names validated to prevent injection attacks  
+- **Secure Credentials**: Environment variable-based credential management
+- **Regular Audits**: Automated security dependency scanning
+
+For detailed security information, see [SECURITY.md](SECURITY.md).
+
+```bash
+# Run security audit
+make audit
+
+# Run all quality checks (including security)
+make quality
+```
+
+---
+
 # Contributing
 
 Contributions and experiments are welcome.
