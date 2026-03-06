@@ -1,12 +1,11 @@
-use arrow::array::{Float64Array, StringArray};
-use arrow::record_batch::RecordBatch;
-use arrow_flight::encode::FlightDataEncoderBuilder;
+use arrow::array::Float64Array;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightDescriptor, Ticket};
 use futures::StreamExt;
 use prost::Message;
 use quiver_core::adapters::BackendAdapter;
 use quiver_core::adapters::memory::MemoryAdapter;
+use quiver_core::adapters::utils::ScalarValue;
 use quiver_core::proto::quiver::v1::{EntityKey, FeatureRequest};
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
@@ -15,9 +14,24 @@ use std::sync::Arc;
 use tonic::transport::Server;
 
 #[tokio::test]
-async fn test_ingestion_retrieval_loop() {
+async fn test_feature_serving_retrieval() {
     let registry = Arc::new(StaticRegistry::new());
-    let memory_adapter: Arc<dyn BackendAdapter> = Arc::new(MemoryAdapter::new());
+
+    // Create memory adapter with pre-seeded test data
+    let memory_adapter = MemoryAdapter::seed([
+        (
+            "u1",
+            [("val", ScalarValue::Float64(10.0))],
+            chrono::Utc::now(),
+        ),
+        (
+            "u2",
+            [("val", ScalarValue::Float64(20.0))],
+            chrono::Utc::now(),
+        ),
+    ]);
+    let memory_adapter: Arc<dyn BackendAdapter> = Arc::new(memory_adapter);
+
     let resolver = Arc::new(Resolver::new(
         registry.clone() as Arc<dyn quiver_core::registry::Registry>
     ));
@@ -50,27 +64,7 @@ async fn test_ingestion_retrieval_loop() {
         .unwrap();
     let mut client = FlightServiceClient::new(channel);
 
-    let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-        arrow::datatypes::Field::new("entity_id", arrow::datatypes::DataType::Utf8, false),
-        arrow::datatypes::Field::new("val", arrow::datatypes::DataType::Float64, true),
-    ]));
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![
-            Arc::new(StringArray::from(vec!["u1", "u2"])),
-            Arc::new(Float64Array::from(vec![10.0, 20.0])),
-        ],
-    )
-    .unwrap();
-
-    let descriptor = FlightDescriptor::new_path(vec!["memory".to_string()]);
-    let encoder = FlightDataEncoderBuilder::new()
-        .with_flight_descriptor(Some(descriptor))
-        .build(futures::stream::once(async move { Ok(batch) }));
-
-    let put_stream = encoder.map(|res| res.unwrap());
-    client.do_put(put_stream).await.unwrap();
-
+    // Register the feature view for serving
     let mut backend_routing = std::collections::HashMap::new();
     backend_routing.insert("val".to_string(), "memory".to_string());
 

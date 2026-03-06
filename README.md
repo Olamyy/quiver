@@ -278,9 +278,43 @@ Configuration precedence:
 2. config file
 3. defaults
 
-Example configuration:
+## Configuration Examples
 
+The [`examples/`](examples/) directory contains comprehensive configuration examples for different deployment scenarios:
+
+- **[`memory-only.yaml`](examples/config/memory-only.yaml)** - Development and high-performance in-memory caching
+- **[`development.yaml`](examples/config/development.yaml)** - Local development with PostgreSQL + Redis
+- **[`postgres-production.yaml`](examples/config/postgres-production.yaml)** - Production with persistent feature storage
+- **[`redis-realtime.yaml`](examples/config/redis-realtime.yaml)** - Ultra-low latency real-time inference
+- **[`hybrid-multi-adapter.yaml`](examples/config/hybrid-multi-adapter.yaml)** - Complex ML pipelines with mixed adapters
+
+### Quick Start with Examples
+
+Use the interactive configuration selector:
+
+```bash
+./examples/quick-start.sh
 ```
+
+Or validate an existing configuration:
+
+```bash
+./examples/validate-config.sh config/my-config.yaml
+```
+
+### Docker Development Environment
+
+For local testing with real databases:
+
+```bash
+cd examples/docker
+docker-compose up -d
+QUIVER_CONFIG="examples/config/development.yaml" make run
+```
+
+## Basic Configuration Structure
+
+```yaml
 server:
   host: "127.0.0.1"
   port: 8815
@@ -306,6 +340,8 @@ adapters:
   memory:
     type: memory
 ```
+
+See the [examples directory](examples/) for complete configuration examples and detailed documentation.
 
 ---
 

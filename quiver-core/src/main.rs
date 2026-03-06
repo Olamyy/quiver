@@ -1,12 +1,15 @@
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
+use quiver_core::adapters::BackendAdapter;
 use quiver_core::adapters::memory::MemoryAdapter;
+use quiver_core::adapters::postgres::PostgresAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::config;
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
 use quiver_core::server::QuiverFlightServer;
 use std::sync::Arc;
+use std::time::Duration;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
@@ -93,6 +96,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 let adapter =
                     RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
+                resolver.register_adapter(
+                    name,
+                    Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,
+                );
+            }
+            config::AdapterConfig::Postgres {
+                connection_string,
+                table_template,
+                max_connections,
+                timeout_seconds,
+            } => {
+                let timeout = timeout_seconds.map(Duration::from_secs);
+                let mut adapter = PostgresAdapter::new(
+                    &connection_string,
+                    &table_template,
+                    max_connections,
+                    timeout,
+                )
+                .await?;
+
+                // Initialize the adapter
+                adapter.initialize().await?;
+
                 resolver.register_adapter(
                     name,
                     Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,

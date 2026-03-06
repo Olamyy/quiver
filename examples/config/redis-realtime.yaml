@@ -1,0 +1,79 @@
+# Example configuration for Redis-based feature serving  
+# Optimized for real-time, low-latency ML inference with current-only features
+
+server:
+  host: "0.0.0.0" 
+  port: 8815
+  
+  # High-performance settings for real-time inference
+  max_concurrent_rpcs: 5000
+  max_message_size_mb: 32
+  timeout_seconds: 10  # Fast timeout for real-time systems
+  compression: gzip
+  
+  access_log:
+    enabled: true
+    format: "json"
+    include_request_body: false
+    include_response_metadata: true
+
+registry:
+  type: static
+  views:
+    - name: "realtime_features"
+      entity_type: "user"
+      entity_key: "user_id"
+      columns:
+        - name: "user_id"
+          arrow_type: "string"
+          nullable: false
+          source: "redis_cache"
+        
+        - name: "current_session_score"
+          arrow_type: "float64"
+          nullable: true
+          source: "redis_cache"
+        
+        - name: "last_action_timestamp"
+          arrow_type: "timestamp"
+          nullable: true
+          source: "redis_cache"
+        
+        - name: "is_online"
+          arrow_type: "boolean"
+          nullable: true
+          source: "redis_cache"
+    
+    - name: "recommendation_features"
+      entity_type: "user"
+      entity_key: "user_id" 
+      columns:
+        - name: "user_id"
+          arrow_type: "string"
+          nullable: false
+          source: "redis_recommendations"
+        
+        - name: "trending_category"
+          arrow_type: "string"
+          nullable: true
+          source: "redis_recommendations"
+        
+        - name: "recommendation_score"
+          arrow_type: "float64"
+          nullable: true
+          source: "redis_recommendations"
+
+# Redis adapters for different data types
+adapters:
+  redis_cache:
+    type: redis
+    # Secure Redis connection - use environment variable for password
+    # QUIVER__ADAPTERS__REDIS_CACHE__PASSWORD="your_redis_password"
+    connection: "rediss://cache.example.com:6380"  # TLS-enabled Redis
+    key_template: "features:user:{entity}:feature:{feature}"
+  
+  redis_recommendations:
+    type: redis
+    connection: "rediss://recommendations.example.com:6380"
+    # Custom key template for recommendation data
+    key_template: "ml:recommendations:{entity}:{feature}"

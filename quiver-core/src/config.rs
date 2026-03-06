@@ -103,10 +103,21 @@ pub enum AdapterConfig {
         #[serde(default = "default_redis_template")]
         key_template: String,
     },
+    Postgres {
+        connection_string: String,
+        #[serde(default = "default_postgres_table_template")]
+        table_template: String,
+        max_connections: Option<u32>,
+        timeout_seconds: Option<u64>,
+    },
 }
 
 fn default_redis_template() -> String {
     "quiver:f:{feature}:e:{entity}".to_string()
+}
+
+fn default_postgres_table_template() -> String {
+    "features_{feature}".to_string()
 }
 
 impl Config {
@@ -169,5 +180,57 @@ adapters:
         let RegistryConfig::Static { views } = config.registry;
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].columns.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_postgres_config() {
+        let yaml = r#"
+server:
+  host: 127.0.0.1
+  port: 9000
+
+registry:
+  type: static
+  views:
+    - name: user_features
+      entity_type: user
+      entity_key: uid
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          source: postgres_adapter
+        - name: session_count
+          arrow_type: int64
+          source: postgres_adapter
+
+adapters:
+  postgres_adapter:
+    type: postgres
+    connection_string: "postgresql://user:password@localhost:5432/features"
+    table_template: "features_{feature}"
+    max_connections: 20
+    timeout_seconds: 30
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to parse YAML with PostgreSQL");
+        assert_eq!(config.adapters.len(), 1);
+
+        if let AdapterConfig::Postgres {
+            connection_string,
+            table_template,
+            max_connections,
+            timeout_seconds,
+        } = config.adapters.get("postgres_adapter").unwrap()
+        {
+            assert_eq!(
+                connection_string,
+                "postgresql://user:password@localhost:5432/features"
+            );
+            assert_eq!(table_template, "features_{feature}");
+            assert_eq!(*max_connections, Some(20));
+            assert_eq!(*timeout_seconds, Some(30));
+        } else {
+            panic!("Expected PostgreSQL adapter config");
+        }
     }
 }

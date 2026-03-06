@@ -332,54 +332,15 @@ impl FlightService for QuiverFlightServer {
         }
     }
 
-    type DoPutStream = Pin<Box<dyn Stream<Item = Result<PutResult, Status>> + Send>>;
+    type DoPutStream = futures::stream::Empty<Result<PutResult, Status>>;
 
     async fn do_put(
         &self,
-        request: Request<Streaming<FlightData>>,
+        _request: Request<Streaming<FlightData>>,
     ) -> Result<Response<Self::DoPutStream>, Status> {
-        let mut stream = request.into_inner();
-
-        let first_msg = stream
-            .next()
-            .await
-            .ok_or_else(|| Status::invalid_argument("Empty stream"))??;
-        let descriptor = first_msg.flight_descriptor.as_ref().ok_or_else(|| {
-            Status::invalid_argument("First FlightData message must contain a FlightDescriptor")
-        })?;
-
-        let backend_name = descriptor
-            .path
-            .first()
-            .ok_or_else(|| {
-                Status::invalid_argument(
-                    "FlightDescriptor path must contain at least one element (backend name)",
-                )
-            })?
-            .clone();
-
-        let full_stream = futures::stream::once(async move { Ok(first_msg) })
-            .chain(stream)
-            .map(|res| {
-                res.map_err(|e| arrow_flight::error::FlightError::ExternalError(Box::new(e)))
-            });
-        let mut reader =
-            arrow_flight::decode::FlightRecordBatchStream::new_from_flight_data(full_stream);
-
-        while let Some(batch_res) = reader.next().await {
-            let batch = batch_res.map_err(|e| Status::internal(format!("Decode error: {}", e)))?;
-            self.resolver
-                .put(&backend_name, batch)
-                .await
-                .map_err(|e| Status::internal(format!("Put failed: {}", e)))?;
-        }
-
-        let res_stream = futures::stream::once(async move {
-            Ok(PutResult {
-                app_metadata: vec![].into(),
-            })
-        });
-        Ok(Response::new(Box::pin(res_stream)))
+        Err(Status::unimplemented(
+            "DoPut is not supported - Quiver is a feature serving layer, not a data ingestion service",
+        ))
     }
 
     type DoExchangeStream = Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>;

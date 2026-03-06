@@ -114,21 +114,6 @@ impl Resolver {
             .await
             .map_err(|e| ResolverError::Registry(e.to_string()))
     }
-
-    pub async fn put(&self, backend_name: &str, batch: RecordBatch) -> Result<(), ResolverError> {
-        let adapter = self
-            .adapters
-            .get(backend_name)
-            .ok_or_else(|| ResolverError::BackendNotFound(backend_name.to_string()))?;
-
-        use crate::adapters::PutOptions;
-
-        adapter
-            .value()
-            .put(batch, &PutOptions::default())
-            .await
-            .map_err(ResolverError::Adapter)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
