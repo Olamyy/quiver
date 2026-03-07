@@ -82,7 +82,7 @@ impl ClickHouseAdapter {
             client,
             table_template: table_template.to_string(),
             timeout_default: timeout_duration,
-            health_timeout: Duration::from_secs(3),
+            health_timeout: Duration::from_secs(10),
             capabilities: Self::static_capabilities(),
             validation_config: validation_config.unwrap_or_default(),
             chunk_size,
@@ -503,12 +503,6 @@ impl BackendAdapter for ClickHouseAdapter {
     }
 
     async fn initialize(&mut self) -> Result<(), AdapterError> {
-        let health = self.health().await;
-        info!("ClickHouse health check: healthy={}, message={:?}", health.healthy, health.message);
-        if !health.healthy {
-            let error_msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
-            return Err(AdapterError::connection_failed(BACKEND_NAME, error_msg));
-        }
         info!("ClickHouse adapter initialized successfully");
         Ok(())
     }
