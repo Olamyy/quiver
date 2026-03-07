@@ -3,7 +3,6 @@ pub mod postgres;
 pub mod redis;
 pub mod utils;
 
-use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use std::time::Duration;
@@ -26,6 +25,13 @@ use std::time::Duration;
 /// Arrow type stability cannot be guaranteed if each adapter independently infers types from its
 /// backend. To make schema consistency enforceable at scale, you typically need a single source
 /// of truth for feature typing (e.g., a registry or a `FeatureSpec` passed in by the caller).
+/// Combined resolution config for a specific feature, providing type and path overrides
+#[derive(Debug, Clone)]
+pub struct FeatureResolution {
+    pub expected_type: arrow::datatypes::DataType,
+    pub source_path: Option<crate::config::SourcePath>,
+}
+
 #[async_trait::async_trait]
 pub trait BackendAdapter: Send + Sync {
     /// Backend identifier used in logs and error messages.
@@ -34,29 +40,11 @@ pub trait BackendAdapter: Send + Sync {
     /// Adapter capabilities including temporal, batching, and performance characteristics.
     fn capabilities(&self) -> AdapterCapabilities;
 
-    /// Describe the Arrow schema for the given feature names.
-    ///
-    /// The returned schema must be stable and match what `get()` returns for the same feature set.
-    ///
-    /// ### Missing / unknown features
-    /// Each adapter must implement a deterministic policy for unknown features. Recommended:
-    /// - **Strict**: return `AdapterError::InvalidRequest` when a feature is unknown/unresolvable.
-    /// - **Lenient** (allowed but discouraged): return a schema using a stable fallback type.
-    ///
-    /// If you choose lenient behavior, it must be *stable across time* and *consistent across adapters*,
-    /// otherwise the "schema consistency" principle is violated.
-    async fn describe_schema(
-        &self,
-        feature_names: &[String],
-        entity_key: &str,
-    ) -> Result<Schema, AdapterError>;
-
     /// Fetch features for entities with optional timeout.
     ///
     /// The returned RecordBatch must:
     /// - Have exactly one row per `entity_id` in the same order as requested
     /// - Include all requested feature columns, null-filled if missing
-    /// - Match the schema from `describe_schema()` for the same feature set
     ///
     /// # Arguments
     /// - `entity_ids` - Entity identifiers to fetch features for
@@ -82,31 +70,31 @@ pub trait BackendAdapter: Send + Sync {
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError>;
 
-    /// Fetch features for entities with explicit expected types.
+    /// Fetch features for entities with explicit resolution configurations.
+    /// This method allows the caller to specify both the expected Arrow types and optional
+    /// specific source paths for each feature in a single combined lookup.
     ///
-    /// This method allows the caller to specify the expected Arrow types for each feature,
-    /// enabling type validation and conversion based on the feature registry configuration.
-    ///
-    /// # Arguments
+    /// # Arguments  
     /// - `entity_ids` - Entity identifiers to fetch features for
-    /// - `feature_names` - Feature names to retrieve  
+    /// - `feature_names` - Feature names to retrieve
     /// - `entity_key` - The column name used as entity identifier
-    /// - `expected_types` - Map of feature names to expected Arrow DataTypes
+    /// - `resolutions` - Map of feature names to their combined FeatureResolution
     /// - `as_of` - Point-in-time for temporal queries (`None` = current time)
     /// - `timeout` - Maximum time to wait for response (`None` = adapter default)
     ///
     /// # Returns
-    /// RecordBatch with features converted to the expected types
+    /// RecordBatch with features retrieved and converted to expected types
     ///
     /// # Default Implementation
-    /// The default implementation calls `get()` and assumes the schema matches expected types.
-    /// Adapters can override this for more sophisticated type handling.
-    async fn get_with_expected_types(
+    /// The default implementation calls `get()`. Adapters should override this to take
+    /// advantage of type checking and per-feature source paths.
+    #[allow(clippy::too_many_arguments)]
+    async fn get_with_resolutions(
         &self,
         entity_ids: &[String],
         feature_names: &[String],
         entity_key: &str,
-        _expected_types: &std::collections::HashMap<String, arrow::datatypes::DataType>,
+        _resolutions: &std::collections::HashMap<String, FeatureResolution>,
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {

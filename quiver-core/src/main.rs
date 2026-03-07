@@ -5,6 +5,7 @@ use quiver_core::adapters::memory::MemoryAdapter;
 use quiver_core::adapters::postgres::PostgresAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::config;
+use quiver_core::logging::ConfigLogger;
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
 use quiver_core::server::QuiverFlightServer;
@@ -41,6 +42,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = config::Config::load(config_path.as_deref())?;
 
+    if let Err(errors) = cfg.validate() {
+        for e in &errors {
+            tracing::error!("Config error: {}", e);
+        }
+        return Err(format!("{} config error(s) found", errors.len()).into());
+    }
+
+    ConfigLogger::log_startup_config(&cfg);
+
     let filtered_config = cfg.to_filtered();
 
     tracing::info!(
@@ -65,12 +75,22 @@ Loaded {} feature views and {} adapters",
 
     let registry = Arc::new(StaticRegistry::new());
 
+    let resolver = Arc::new(Resolver::new(
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>
+    ));
+
     let config::RegistryConfig::Static { views } = cfg.registry;
     for view in views {
         let mut backend_routing = std::collections::HashMap::new();
         for col in &view.columns {
             backend_routing.insert(col.name.clone(), col.source.clone());
         }
+
+        resolver.register_view_columns(
+            view.name.clone(),
+            view.columns.clone(),
+            view.source_path.clone(),
+        );
 
         registry.register(quiver_core::proto::quiver::v1::FeatureViewMetadata {
             name: view.name,
@@ -86,13 +106,9 @@ Loaded {} feature views and {} adapters",
                 })
                 .collect(),
             backend_routing,
-            schema_version: view.schema_version,
+            schema_version: 0,
         });
     }
-
-    let resolver = Arc::new(Resolver::new(
-        registry.clone() as Arc<dyn quiver_core::registry::Registry>
-    ));
 
     for (name, adapter_cfg) in cfg.adapters {
         match adapter_cfg {
@@ -103,32 +119,43 @@ Loaded {} feature views and {} adapters",
             config::AdapterConfig::Redis {
                 connection,
                 password,
-                key_template,
+                source_path,
                 tls,
+                parameters,
             } => {
                 let adapter = RedisAdapter::new(
                     &connection,
                     password.as_deref(),
-                    &key_template,
+                    &source_path,
+                    None,
                     tls.as_ref(),
+                    Some(cfg.server.validation.clone()),
+                    Some(&parameters),
                 )
                 .await?;
                 resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
             }
             config::AdapterConfig::Postgres {
                 connection_string,
-                table_template,
+                source_path,
                 max_connections,
                 timeout_seconds,
                 tls,
+                parameters,
             } => {
                 let timeout = timeout_seconds.map(Duration::from_secs);
+                let table_template = match &source_path {
+                    quiver_core::config::SourcePath::Template(tmpl) => tmpl.as_str(),
+                    quiver_core::config::SourcePath::Structured { table, .. } => table.as_str(),
+                };
                 let mut adapter = PostgresAdapter::new(
                     &connection_string,
-                    &table_template,
+                    table_template,
                     max_connections,
                     timeout,
                     tls.as_ref(),
+                    Some(cfg.server.validation.clone()),
+                    Some(&parameters),
                 )
                 .await?;
 

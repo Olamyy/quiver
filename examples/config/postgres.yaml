@@ -79,7 +79,7 @@ adapters:
     type: postgres
     # Connection without SSL parameters - TLS controlled via tls section
     connection_string: "postgresql://quiver_user:quiver_dev_password@127.0.0.1:5432/quiver_features"
-    table_template: "user_features_{feature}"
+    source_path: "user_features_{feature}"
     max_connections: 20
     timeout_seconds: 30
     # TLS configuration (uncomment for production)
@@ -93,7 +93,7 @@ adapters:
     type: postgres
     # Change this from analytics-db.example.com to 127.0.0.1
     connection_string: "postgresql://quiver_user:quiver_dev_password@127.0.0.1:5432/quiver_features"
-    table_template: "user_features_{feature}"
+    source_path: "user_features_{feature}"
     max_connections: 15
     timeout_seconds: 45
     # Example: TLS without certificate verification (for development)

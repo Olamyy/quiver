@@ -130,11 +130,11 @@ impl FlightService for QuiverFlightServer {
             .map_err(|e| Status::internal(format!("Failed to list views: {}", e)))?;
 
         let flights = views.into_iter().map(|name| FlightInfo {
-            schema: prost::bytes::Bytes::new(),
+            schema: bytes::Bytes::new(),
             flight_descriptor: Some(FlightDescriptor {
                 r#type: arrow_flight::flight_descriptor::DescriptorType::Path as i32,
                 path: vec![name],
-                cmd: prost::bytes::Bytes::new(),
+                cmd: bytes::Bytes::new(),
             }),
             endpoint: vec![],
             total_records: -1,
@@ -215,7 +215,7 @@ impl FlightService for QuiverFlightServer {
         &self,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<SchemaResult>, Status> {
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
         let descriptor = request.into_inner();
         let view_name = descriptor.path.first().ok_or_else(|| {
             Status::invalid_argument("FlightDescriptor must contain a path for the feature view")
@@ -311,6 +311,13 @@ impl FlightService for QuiverFlightServer {
             feature_view, entity_count, feature_count
         );
 
+        // Extract timeout from server configuration
+        let timeout = self
+            .filtered_config
+            .server
+            .timeout_seconds
+            .map(std::time::Duration::from_secs);
+
         let batch_result = self
             .resolver
             .resolve(
@@ -332,6 +339,7 @@ impl FlightService for QuiverFlightServer {
                         })
                     })
                     .transpose()?,
+                timeout,
             )
             .await;
 
@@ -397,6 +405,13 @@ impl FlightService for QuiverFlightServer {
         let mut stream = request.into_inner();
         let resolver = self.resolver.clone();
 
+        // Extract timeout configuration before entering the stream
+        let timeout = self
+            .filtered_config
+            .server
+            .timeout_seconds
+            .map(std::time::Duration::from_secs);
+
         let output_stream = async_stream::try_stream! {
             while let Some(data_res) = stream.next().await {
                 let data = data_res?;
@@ -421,6 +436,7 @@ impl FlightService for QuiverFlightServer {
                         &feature_request.feature_names,
                         &entities,
                         as_of,
+                        timeout,
                     )
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
