@@ -2,15 +2,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use sqlx::{Column, PgPool, Row, TypeInfo, postgres::PgRow};
 use tokio::sync::RwLock;
 use tracing::info;
 
-use super::utils::{ScalarValue, build_record_batch, convert_raw_to_scalar, validation};
-use super::{AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, TemporalCapability};
+use super::utils::{ScalarValue, StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
+use super::{
+    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
+    TemporalCapability,
+};
+use crate::validation::{RequestValidation, ValidationConfig};
 
 const BACKEND_NAME: &str = "postgres";
 
@@ -28,6 +32,7 @@ pub struct PostgresAdapter {
     health_timeout: Duration,
     capabilities: AdapterCapabilities,
     table_name_cache: RwLock<HashMap<String, String>>,
+    validation_config: ValidationConfig,
 }
 
 impl PostgresAdapter {
@@ -39,6 +44,7 @@ impl PostgresAdapter {
     /// * `max_connections` - Maximum connections in pool
     /// * `timeout` - Default timeout for operations
     /// * `tls_config` - Optional TLS configuration
+    /// * `validation_config` - Optional validation configuration
     ///
     /// # Security
     /// Connection strings are validated to ensure secure TLS connections.
@@ -49,6 +55,8 @@ impl PostgresAdapter {
         max_connections: Option<u32>,
         timeout: Option<Duration>,
         tls_config: Option<&crate::config::AdapterTlsConfig>,
+        validation_config: Option<ValidationConfig>,
+        _parameters: Option<&std::collections::HashMap<String, serde_json::Value>>,
     ) -> Result<Self, AdapterError> {
         Self::validate_connection_security(connection_string)?;
 
@@ -94,6 +102,7 @@ impl PostgresAdapter {
             health_timeout: Duration::from_secs(3),
             capabilities,
             table_name_cache: RwLock::new(HashMap::new()),
+            validation_config: validation_config.unwrap_or_default(),
         })
     }
 
@@ -241,6 +250,14 @@ impl PostgresAdapter {
             supports_parallel_requests: true,
         }
     }
+
+    /// Quote PostgreSQL identifier safely to prevent SQL injection.
+    /// This adds an extra layer of protection beyond validation.
+    fn quote_identifier(identifier: &str) -> String {
+        // PostgreSQL identifier quoting: double quotes and escape internal quotes
+        format!("\"{}\"", identifier.replace('"', "\"\""))
+    }
+
     ///
     /// Only allows alphanumeric characters and underscores, starting with letter or underscore.
     /// This prevents SQL injection through identifier manipulation.
@@ -500,15 +517,53 @@ impl PostgresAdapter {
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {
-        validation::validate_entity_ids_not_empty(entity_ids, BACKEND_NAME)?;
-        validation::validate_feature_names_not_empty(feature_names, BACKEND_NAME)?;
-        validation::validate_memory_constraints(
-            entity_ids.len(),
-            feature_names.len(),
-            Some(20),
-            Some(256),
-            BACKEND_NAME,
-        )?;
+        if self
+            .validation_config
+            .should_validate_request(&RequestValidation::EntityIdsNotEmpty)
+        {
+            validation::validate_entity_ids_not_empty(entity_ids, BACKEND_NAME)?;
+        }
+
+        if self
+            .validation_config
+            .should_validate_request(&RequestValidation::FeatureNamesNotEmpty)
+        {
+            validation::validate_feature_names_not_empty(feature_names, BACKEND_NAME)?;
+        }
+
+        if self
+            .validation_config
+            .should_validate_request(&RequestValidation::MemoryConstraints)
+        {
+            validation::validate_memory_constraints(
+                entity_ids.len(),
+                feature_names.len(),
+                Some(20),
+                Some(256),
+                BACKEND_NAME,
+            )?;
+        }
+
+        if self
+            .validation_config
+            .should_validate_request(&RequestValidation::BatchSizeLimit)
+        {
+            validation::validate_batch_size(
+                entity_ids.len(),
+                self.capabilities.max_batch_size,
+                BACKEND_NAME,
+            )?;
+        }
+
+        if self
+            .validation_config
+            .should_validate_request(&RequestValidation::SqlIdentifierSafety)
+        {
+            Self::validate_identifier(entity_key)?;
+            for feature_name in feature_names {
+                Self::validate_identifier(feature_name)?;
+            }
+        }
 
         let timeout_duration = timeout.unwrap_or(self.timeout_default);
         let cutoff = as_of.unwrap_or_else(Utc::now);
@@ -526,24 +581,27 @@ impl PostgresAdapter {
 
                 let query = format!(
                     r#"
-                    WITH ranked_features AS (
+                    WITH requested_entities AS (
+                        SELECT unnest($1::text[]) AS {entity_key}
+                    ),
+                    ranked_features AS (
                         SELECT
-                            {entity_key},
-                            {col} as feature_value,
-                            feature_ts,
-                            ROW_NUMBER() OVER (PARTITION BY {entity_key} ORDER BY feature_ts DESC) as rn
-                        FROM {table}
-                        WHERE {entity_key} = ANY($1)
-                          AND feature_ts <= $2
-                          AND {col} IS NOT NULL
+                            t.{entity_key},
+                            t.{col} as feature_value,
+                            t.feature_ts,
+                            ROW_NUMBER() OVER (PARTITION BY t.{entity_key} ORDER BY t.feature_ts DESC) as rn
+                        FROM {table} t
+                        INNER JOIN requested_entities r ON t.{entity_key} = r.{entity_key}
+                        WHERE t.feature_ts <= $2
+                          AND t.{col} IS NOT NULL
                     )
                     SELECT {entity_key}, feature_value
                     FROM ranked_features
                     WHERE rn = 1
                     "#,
-                    entity_key = entity_key,
-                    col = feature_name,
-                    table = table_name,
+                    entity_key = Self::quote_identifier(entity_key),
+                    col = Self::quote_identifier(feature_name),
+                    table = Self::quote_identifier(&table_name),
                 );
 
                 Ok((feature_index, query, expected_type, feature_name.to_string()))
@@ -597,18 +655,43 @@ impl PostgresAdapter {
 
         let results = futures::future::join_all(query_futures).await;
 
-        let mut resolved: Vec<Option<Vec<Option<ScalarValue>>>> = vec![None; feature_names.len()];
-        for result in results {
-            let (feature_index, feature_values) = result?;
-            resolved[feature_index] = Some(feature_values);
-        }
-
-        let resolved: Vec<Vec<Option<ScalarValue>>> = resolved
-            .into_iter()
-            .map(|opt| opt.unwrap_or_else(|| vec![None; entity_ids.len()]))
+        // Prepare feature types for streaming builder
+        let feature_types: Vec<_> = feature_names
+            .iter()
+            .map(|name| expected_types.get(name).cloned().unwrap_or(DataType::Utf8))
             .collect();
 
-        build_record_batch(entity_ids, feature_names, entity_key, resolved)
+        // Create streaming builder - no 2D matrix allocation!
+        let mut builder = StreamingRecordBatchBuilder::new_with_types(
+            entity_ids,
+            feature_names,
+            entity_key,
+            feature_types,
+        )
+        .map_err(|e| {
+            AdapterError::internal(
+                BACKEND_NAME,
+                format!("Failed to create streaming builder: {}", e),
+            )
+        })?;
+
+        // Process results and stream directly to Arrow builders
+        for result in results {
+            let (feature_index, feature_values) = result?;
+
+            // Stream each entity value directly to builder
+            for (entity_idx, value) in feature_values.into_iter().enumerate() {
+                builder
+                    .set_value(feature_index, entity_idx, value)
+                    .map_err(|e| {
+                        AdapterError::internal(BACKEND_NAME, format!("Failed to set value: {}", e))
+                    })?;
+            }
+        }
+
+        // Finish building RecordBatch
+        builder
+            .finish()
             .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))
     }
 }
@@ -621,26 +704,6 @@ impl BackendAdapter for PostgresAdapter {
 
     fn capabilities(&self) -> AdapterCapabilities {
         self.capabilities
-    }
-
-    async fn describe_schema(
-        &self,
-        feature_names: &[String],
-        entity_key: &str,
-    ) -> Result<Schema, AdapterError> {
-        validation::validate_feature_names_not_empty(feature_names, BACKEND_NAME)?;
-
-        // WARNING: This method returns a fallback Utf8 schema and does NOT introspect
-        // the actual PostgreSQL schema. The registry configuration should be the source
-        // of truth for feature types. Use get_with_expected_types() with registry types
-        // for proper type handling.
-        let mut fields = vec![Field::new(entity_key, DataType::Utf8, false)];
-
-        for feature_name in feature_names {
-            fields.push(Field::new(feature_name, DataType::Utf8, true));
-        }
-
-        Ok(Schema::new(fields))
     }
 
     async fn get(
@@ -661,6 +724,38 @@ impl BackendAdapter for PostgresAdapter {
             feature_names,
             entity_key,
             &fallback_types,
+            as_of,
+            timeout,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn get_with_resolutions(
+        &self,
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        resolutions: &HashMap<String, FeatureResolution>,
+        as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
+    ) -> Result<RecordBatch, AdapterError> {
+        let expected_types: HashMap<String, DataType> = feature_names
+            .iter()
+            .map(|name| {
+                let expected_type = resolutions
+                    .get(name)
+                    .map(|r| r.expected_type.clone())
+                    .unwrap_or(DataType::Utf8);
+                (name.clone(), expected_type)
+            })
+            .collect();
+
+        self.get_with_expected_types(
+            entity_ids,
+            feature_names,
+            entity_key,
+            &expected_types,
             as_of,
             timeout,
         )
@@ -724,6 +819,8 @@ mod tests {
             "test_features_{feature}",
             Some(5),
             Some(StdDuration::from_secs(10)),
+            None,
+            None,
             None,
         )
         .await
@@ -791,6 +888,20 @@ mod tests {
         assert!(caps.supports_parallel_requests);
     }
 
+    #[test]
+    fn test_identifier_quoting() {
+        assert_eq!(PostgresAdapter::quote_identifier("simple"), "\"simple\"");
+        assert_eq!(
+            PostgresAdapter::quote_identifier("with\"quote"),
+            "\"with\"\"quote\""
+        );
+        assert_eq!(
+            PostgresAdapter::quote_identifier("table.column"),
+            "\"table.column\""
+        );
+        assert_eq!(PostgresAdapter::quote_identifier("user"), "\"user\""); // Reserved word
+    }
+
     #[tokio::test]
     async fn test_adapter_configuration() {
         let connection_string = "postgresql://test:test@localhost:5432/quiver_test";
@@ -800,6 +911,8 @@ mod tests {
             "test_features_{feature}",
             Some(5),
             Some(StdDuration::from_secs(10)),
+            None,
+            None,
             None,
         )
         .await;
@@ -862,16 +975,18 @@ mod tests {
     async fn test_adapter_instantiation() {
         let connection_string = "postgresql://test:test@localhost:5432/quiver_test";
 
-        let adapter_result = PostgresAdapter::new(
+        let adapter = PostgresAdapter::new(
             connection_string,
             "test_features_{feature}",
             Some(5),
             Some(StdDuration::from_secs(10)),
             None,
+            None,
+            None,
         )
         .await;
 
-        match adapter_result {
+        match adapter {
             Ok(adapter) => {
                 assert_eq!(adapter.table_template, "test_features_{feature}");
                 assert_eq!(adapter.timeout_default, StdDuration::from_secs(10));
@@ -891,6 +1006,8 @@ mod tests {
             "test_features_{feature}",
             Some(5),
             Some(StdDuration::from_secs(10)),
+            None,
+            None,
             None,
         )
         .await;

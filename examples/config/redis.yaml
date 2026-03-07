@@ -73,7 +73,9 @@ adapters:
   redis_cache:
     type: redis
     connection: "redis://:quiver_dev_redis_password@127.0.0.1:6379"
-    key_template: "features:user:{entity}:feature:{feature}"
+    source_path: "features:user:{entity}:feature:{feature}"
+    parameters:
+      mget_chunk_size: 1000
     # TLS configuration (uncomment for production with TLS-enabled Redis)
     # tls:
     #   verify_certificates: true
@@ -84,8 +86,8 @@ adapters:
   redis_recommendations:
     type: redis
     connection: "redis://:quiver_dev_redis_password@127.0.0.1:6379"
-    # Custom key template for recommendation data
-    key_template: "ml:recommendations:{entity}:{feature}"
+    # Custom source path for recommendation data
+    source_path: "ml:recommendations:{entity}:{feature}"
     # Example: TLS without certificate verification (for testing)
     # tls:
     #   verify_certificates: false

@@ -3,8 +3,7 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use super::{AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, TemporalCapability};
-use crate::adapters::utils::{ScalarValue, build_record_batch};
-use arrow::datatypes::{DataType, Field, Schema};
+use crate::adapters::utils::{ScalarValue, build_record_batch, validation};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 
@@ -121,34 +120,6 @@ impl BackendAdapter for MemoryAdapter {
         }
     }
 
-    async fn describe_schema(
-        &self,
-        feature_names: &[String],
-        entity_key: &str,
-    ) -> Result<Schema, AdapterError> {
-        if feature_names.is_empty() {
-            return Err(AdapterError::invalid(
-                BACKEND_NAME,
-                "feature_names cannot be empty",
-            ));
-        }
-
-        let rows = self.rows.read().unwrap();
-        let mut fields = vec![Field::new(entity_key, DataType::Utf8, false)];
-
-        for feature_name in feature_names {
-            let data_type = rows
-                .iter()
-                .find_map(|row| row.features.get(feature_name))
-                .map(|value| value.data_type())
-                .unwrap_or(DataType::Float64);
-
-            fields.push(Field::new(feature_name, data_type, true));
-        }
-
-        Ok(Schema::new(fields))
-    }
-
     async fn get(
         &self,
         entity_ids: &[String],
@@ -157,58 +128,76 @@ impl BackendAdapter for MemoryAdapter {
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {
-        let start_time = std::time::Instant::now();
+        let _start_time = std::time::Instant::now();
 
-        if entity_ids.is_empty() {
-            return Err(AdapterError::invalid(
-                BACKEND_NAME,
-                "entity_ids cannot be empty",
-            ));
-        }
-        if feature_names.is_empty() {
-            return Err(AdapterError::invalid(
-                BACKEND_NAME,
-                "feature_names cannot be empty",
-            ));
-        }
+        validation::validate_entity_ids_not_empty(entity_ids, BACKEND_NAME)?;
+        validation::validate_feature_names_not_empty(feature_names, BACKEND_NAME)?;
 
         let capabilities = self.capabilities();
-        if let Some(max_batch) = capabilities.max_batch_size
-            && entity_ids.len() > max_batch
-        {
-            return Err(AdapterError::resource_limit_exceeded(
-                BACKEND_NAME,
-                format!(
-                    "batch size {} exceeds maximum {}",
-                    entity_ids.len(),
-                    max_batch
-                ),
-            ));
-        }
+        validation::validate_batch_size(
+            entity_ids.len(),
+            capabilities.max_batch_size,
+            BACKEND_NAME,
+        )?;
 
         let cutoff = as_of.unwrap_or_else(Utc::now);
         let rows = self.rows.read().unwrap();
 
-        let resolved: Vec<Vec<Option<ScalarValue>>> = feature_names
-            .iter()
-            .map(|fname| {
-                entity_ids
-                    .iter()
-                    .map(|eid| Self::resolve_one(&rows, eid, fname, &cutoff))
-                    .collect()
-            })
-            .collect();
+        // Create timeout checker if timeout is specified
+        let mut timeout_checker = timeout.map(|duration| {
+            let budget = crate::timeout::TimeoutBudget::new(duration);
+            crate::timeout::TimeoutChecker::new(budget, std::time::Duration::from_millis(100))
+        });
+
+        let mut resolved: Vec<Vec<Option<ScalarValue>>> = Vec::with_capacity(feature_names.len());
+
+        for fname in feature_names.iter() {
+            // Check timeout periodically during processing
+            if let Some(ref mut checker) = timeout_checker
+                && checker.check()
+            {
+                drop(rows);
+                return Err(AdapterError::timeout(
+                    BACKEND_NAME,
+                    timeout.unwrap().as_millis() as u64,
+                ));
+            }
+
+            let feature_results: Result<Vec<Option<ScalarValue>>, AdapterError> = entity_ids
+                .iter()
+                .enumerate()
+                .map(|(entity_idx, eid)| {
+                    // For large datasets, check timeout every 1000 entities
+                    if entity_idx % 1000 == 0
+                        && let Some(ref mut checker) = timeout_checker
+                        && checker.force_check()
+                    {
+                        return Err(AdapterError::timeout(
+                            BACKEND_NAME,
+                            timeout.unwrap().as_millis() as u64,
+                        ));
+                    }
+                    Ok(Self::resolve_one(&rows, eid, fname, &cutoff))
+                })
+                .collect();
+
+            let feature_results = feature_results?;
+
+            // Final timeout check after processing each feature
+            if let Some(ref mut checker) = timeout_checker
+                && checker.force_check()
+            {
+                drop(rows);
+                return Err(AdapterError::timeout(
+                    BACKEND_NAME,
+                    timeout.unwrap().as_millis() as u64,
+                ));
+            }
+
+            resolved.push(feature_results);
+        }
 
         drop(rows);
-
-        if let Some(timeout_duration) = timeout
-            && start_time.elapsed() > timeout_duration
-        {
-            return Err(AdapterError::timeout(
-                BACKEND_NAME,
-                timeout_duration.as_millis() as u64,
-            ));
-        }
 
         build_record_batch(entity_ids, feature_names, entity_key, resolved)
             .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))

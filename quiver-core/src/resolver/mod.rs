@@ -1,15 +1,20 @@
 use crate::adapters::utils::parse_arrow_type_string;
 use crate::adapters::{AdapterError, BackendAdapter};
+use crate::config::{ColumnConfig, SourcePath};
 use crate::proto::quiver::v1::FeatureViewMetadata;
 use crate::registry::Registry;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct Resolver {
     registry: Arc<dyn Registry>,
     adapters: DashMap<String, Arc<dyn BackendAdapter>>,
+    column_configs: DashMap<String, HashMap<String, ColumnConfig>>,
+    view_source_paths: DashMap<String, SourcePath>,
 }
 
 impl Resolver {
@@ -17,11 +22,29 @@ impl Resolver {
         Self {
             registry,
             adapters: DashMap::new(),
+            column_configs: DashMap::new(),
+            view_source_paths: DashMap::new(),
         }
     }
 
     pub fn register_adapter(&self, name: String, adapter: Arc<dyn BackendAdapter>) {
         self.adapters.insert(name, adapter);
+    }
+
+    pub fn register_view_columns(
+        &self,
+        view_name: String,
+        columns: Vec<ColumnConfig>,
+        view_source_path: Option<SourcePath>,
+    ) {
+        let column_map: HashMap<String, ColumnConfig> = columns
+            .into_iter()
+            .map(|col| (col.name.clone(), col))
+            .collect();
+        self.column_configs.insert(view_name.clone(), column_map);
+        if let Some(sp) = view_source_path {
+            self.view_source_paths.insert(view_name, sp);
+        }
     }
 
     /// Convert arrow_type string to Arrow DataType using the shared utility.
@@ -32,7 +55,6 @@ impl Resolver {
         arrow_type: &str,
         column_name: &str,
     ) -> Result<arrow::datatypes::DataType, ResolverError> {
-        // Handle timestamp_ns as timestamp for backward compatibility
         let normalized_type = if arrow_type == "timestamp_ns" {
             "timestamp"
         } else {
@@ -46,7 +68,6 @@ impl Resolver {
             ))
         })?;
 
-        // Add UTC timezone for timestamps as required by resolver
         if let arrow::datatypes::DataType::Timestamp(unit, _) = data_type {
             data_type = arrow::datatypes::DataType::Timestamp(unit, Some("UTC".into()));
         }
@@ -60,6 +81,7 @@ impl Resolver {
         feature_names: &[String],
         entity_ids: &[String],
         as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
     ) -> Result<RecordBatch, ResolverError> {
         let metadata = self
             .registry
@@ -87,27 +109,50 @@ impl Resolver {
             .get(backend_name)
             .ok_or_else(|| ResolverError::BackendNotFound(backend_name.clone()))?;
 
-        let mut expected_types = std::collections::HashMap::new();
+        let mut resolutions = std::collections::HashMap::new();
+
         for feature_name in feature_names {
+            let mut expected_type = arrow::datatypes::DataType::Utf8;
+
             if let Some(column) = metadata
                 .columns
                 .iter()
                 .find(|col| &col.name == feature_name)
             {
-                let dt = Self::parse_arrow_type(&column.arrow_type, &column.name)?;
-                expected_types.insert(feature_name.clone(), dt);
+                expected_type = Self::parse_arrow_type(&column.arrow_type, &column.name)?;
             }
+
+            let mut resolved_path = None;
+            if let Some(cols) = self.column_configs.get(feature_view_name)
+                && let Some(col) = cols.get(feature_name)
+            {
+                resolved_path = col.source_path.clone();
+            }
+
+            if resolved_path.is_none()
+                && let Some(sp) = self.view_source_paths.get(feature_view_name)
+            {
+                resolved_path = Some(sp.clone());
+            }
+
+            resolutions.insert(
+                feature_name.clone(),
+                crate::adapters::FeatureResolution {
+                    expected_type,
+                    source_path: resolved_path,
+                },
+            );
         }
 
         let batch = adapter
             .value()
-            .get_with_expected_types(
+            .get_with_resolutions(
                 entity_ids,
                 feature_names,
                 &metadata.entity_key,
-                &expected_types,
+                &resolutions,
                 as_of,
-                None,
+                timeout,
             )
             .await
             .map_err(ResolverError::Adapter)?;

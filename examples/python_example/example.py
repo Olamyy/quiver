@@ -9,6 +9,7 @@ from quiver.exceptions import (
     QuiverFeatureNotFound,
     QuiverServerError,
 )
+from s3_parquet_examples import S3ParquetExamples
 
 
 def get_test_data_for_adapter_type(
@@ -286,7 +287,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic usage
+  # Basic usage - test all feature views
   python example.py
 
   # Test specific endpoint with more entities
@@ -300,6 +301,11 @@ Examples:
 
   # Quiet output showing only data
   python example.py --quiet --show-data-only
+
+  # S3/Parquet examples (requires S3/Parquet server config)
+  python example.py --s3-example all
+  python example.py --s3-example user_features
+  python example.py --s3-example daily_metrics
 
   # Comprehensive test with all parameters
   python example.py --entities 5 --max-features 5 --verbose --timeout 60
@@ -369,6 +375,12 @@ Examples:
         help="Only test schema discovery, skip feature retrieval",
     )
 
+    parser.add_argument(
+        "--s3-example",
+        choices=["user_features", "daily_metrics", "products", "all"],
+        help="Run S3/Parquet adapter examples (requires compatible server config)",
+    )
+
     args = parser.parse_args()
 
     verbose = args.verbose and not args.quiet and not args.show_data_only
@@ -382,6 +394,33 @@ Examples:
     client = test_server_connection(args.endpoint, args.timeout)
     if not client:
         sys.exit(1)
+
+    if args.s3_example:
+        try:
+            s3_examples = S3ParquetExamples(client)
+
+            print("=" * 60)
+            print("S3/Parquet Adapter Examples")
+            print("=" * 60)
+
+            if args.s3_example in ["all", "user_features"]:
+                s3_examples.query_user_features()
+
+            if args.s3_example in ["all", "daily_metrics"]:
+                s3_examples.query_daily_metrics_timetravel()
+
+            if args.s3_example in ["all", "products"]:
+                s3_examples.query_products()
+
+            print("\n" + "=" * 60)
+            print("✓ S3/Parquet examples completed!")
+            print("=" * 60)
+        except Exception as e:
+            print(f"Error running S3/Parquet examples: {e}")
+            sys.exit(1)
+        finally:
+            client.close()
+        return
 
     try:
         if not quiet:

@@ -1,0 +1,52 @@
+# S3/Parquet Adapter Configuration - Local Filesystem
+# Tests the adapter using local filesystem instead of S3
+# Useful for development and testing without AWS credentials
+
+server:
+  host: "0.0.0.0"
+  port: 8815
+  max_concurrent_rpcs: 1000
+  max_message_size_mb: 128
+  timeout_seconds: 30
+  compression: gzip
+
+  access_log:
+    enabled: true
+    format: "json"
+    include_request_body: false
+    include_response_metadata: true
+
+registry:
+  type: static
+  views:
+    - name: "batch_user_features"
+      entity_type: "user"
+      entity_key: "user_id"
+      columns:
+        - name: "user_id"
+          arrow_type: "string"
+          nullable: false
+          source: "s3_parquet_adapter"
+
+        - name: "profile_id"
+          arrow_type: "int64"
+          nullable: true
+          source: "s3_parquet_adapter"
+
+        - name: "profile_creation_date"
+          arrow_type: "timestamp"
+          nullable: false
+          source: "s3_parquet_adapter"
+
+        - name: "is_active"
+          arrow_type: "bool"
+          nullable: true
+          source: "s3_parquet_adapter"
+
+adapters:
+  s3_parquet_adapter:
+    type: s3parquet
+    storage_uri: "file:///tmp/quiver_test_data"
+    source_path: "/features/user_features.parquet"
+    timeout_seconds: 30
+    max_days_back: 365
