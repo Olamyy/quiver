@@ -62,8 +62,6 @@ impl ClickHouseAdapter {
         let client = Client::default()
             .with_url(connection_string)
             .with_database(&database_name);
-        // Note: max_connections, max_insert_block_size, max_block_size are not valid HTTP API settings
-        // The HTTP API handles these automatically or through different mechanisms
 
         let timeout_duration = timeout.unwrap_or(Duration::from_secs(30));
 
@@ -121,12 +119,10 @@ impl ClickHouseAdapter {
     /// Expects format: "http://host:port" with optional "?database=name" parameter.
     /// Falls back to "quiver_test" if not specified (for examples).
     fn extract_database_name(connection_string: &str) -> Result<String, AdapterError> {
-        // Check for ?database=name parameter
         if let Some(q_pos) = connection_string.find('?') {
             let query_part = &connection_string[q_pos + 1..];
             for param in query_part.split('&') {
-                if param.starts_with("database=") {
-                    let db_name = &param[9..];  // "database=".len() == 9
+                if let Some(db_name) = param.strip_prefix("database=") {
                     if !db_name.is_empty() {
                         return Ok(db_name.to_string());
                     }
@@ -134,7 +130,6 @@ impl ClickHouseAdapter {
             }
         }
 
-        // Default to quiver_test for examples
         Ok("quiver_test".to_string())
     }
 
@@ -236,7 +231,6 @@ impl ClickHouseAdapter {
 
         Self::validate_identifier(&table_name)?;
 
-        // Table name is used as-is; the database context is set via the client's with_database()
         Ok(table_name)
     }
 
@@ -414,7 +408,13 @@ impl BackendAdapter for ClickHouseAdapter {
         let table_name = self.resolve_table_name(feature_name, source_path)?;
 
         let query = if let Some(as_of_time) = as_of {
-            self.build_temporal_query(&table_name, entity_ids, entity_key, as_of_time, feature_names)
+            self.build_temporal_query(
+                &table_name,
+                entity_ids,
+                entity_key,
+                as_of_time,
+                feature_names,
+            )
         } else {
             self.build_current_state_query(&table_name, entity_ids, entity_key, feature_names)
         };
@@ -428,7 +428,6 @@ impl BackendAdapter for ClickHouseAdapter {
             entity_index.insert(id.clone(), idx);
         }
 
-        // Extract feature types from resolutions
         let feature_types: Vec<_> = feature_names
             .iter()
             .map(|name| {
@@ -446,33 +445,25 @@ impl BackendAdapter for ClickHouseAdapter {
             feature_types,
         )
         .map_err(|e| {
-            AdapterError::internal(
-                BACKEND_NAME,
-                format!("Failed to create builder: {}", e),
-            )
+            AdapterError::internal(BACKEND_NAME, format!("Failed to create builder: {}", e))
         })?;
 
-        let rows_result = tokio::time::timeout(
-            timeout_duration,
-            async {
-                client
-                    .query(&query)
-                    .fetch_all::<(String, String, String, String, String)>()
-                    .await
-                    .map_err(|e| {
-                        AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
-                    })
-            },
-        )
+        let rows_result = tokio::time::timeout(timeout_duration, async {
+            client
+                .query(&query)
+                .fetch_all::<(String, String, String, String, String)>()
+                .await
+                .map_err(|e| {
+                    AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
+                })
+        })
         .await
-        .map_err(|_| {
-            AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64)
-        })?
+        .map_err(|_| AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64))?
         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
 
         for (entity_id, val1, val2, val3, val4) in rows_result {
             if let Some(entity_idx) = entity_index.get(&entity_id) {
-                let row_values = vec![val1, val2, val3, val4];
+                let row_values = [val1, val2, val3, val4];
 
                 for (feature_idx, feature_name) in feature_names.iter().enumerate() {
                     let raw_value = if feature_idx < row_values.len() {
@@ -485,8 +476,6 @@ impl BackendAdapter for ClickHouseAdapter {
                         .get(feature_name)
                         .map(|r| r.expected_type.clone())
                         .unwrap_or(DataType::Utf8);
-
-                    tracing::debug!("Feature: {}, Raw value: '{}', Expected type: {:?}", feature_name, raw_value, expected_type);
 
                     let converted_value = if raw_value.is_empty() || raw_value == "NULL" {
                         None
@@ -555,12 +544,9 @@ mod tests {
 
     #[test]
     fn test_validate_connection_string() {
+        assert!(ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok());
         assert!(
-            ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok()
-        );
-        assert!(
-            ClickHouseAdapter::validate_connection_string("https://user:pass@host:8123")
-                .is_ok()
+            ClickHouseAdapter::validate_connection_string("https://user:pass@host:8123").is_ok()
         );
         assert!(ClickHouseAdapter::validate_connection_string("").is_err());
         assert!(ClickHouseAdapter::validate_connection_string("postgresql://localhost").is_err());
@@ -618,9 +604,7 @@ mod tests {
 
     #[test]
     fn test_build_current_state_query() {
-        assert!(
-            ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok()
-        );
+        assert!(ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok());
     }
 
     #[test]
