@@ -59,7 +59,7 @@ impl ClickHouseAdapter {
         let database_name = Self::extract_database_name(connection_string)
             .unwrap_or_else(|_| "quiver_test".to_string());
 
-        let mut client = Client::default()
+        let client = Client::default()
             .with_url(connection_string)
             .with_database(&database_name);
         // Note: max_connections, max_insert_block_size, max_block_size are not valid HTTP API settings
@@ -428,10 +428,22 @@ impl BackendAdapter for ClickHouseAdapter {
             entity_index.insert(id.clone(), idx);
         }
 
-        let mut builder = super::utils::StreamingRecordBatchBuilder::new(
+        // Extract feature types from resolutions
+        let feature_types: Vec<_> = feature_names
+            .iter()
+            .map(|name| {
+                resolutions
+                    .get(name)
+                    .map(|r| r.expected_type.clone())
+                    .unwrap_or(DataType::Utf8)
+            })
+            .collect();
+
+        let mut builder = super::utils::StreamingRecordBatchBuilder::new_with_types(
             entity_ids,
             feature_names,
             entity_key,
+            feature_types,
         )
         .map_err(|e| {
             AdapterError::internal(
@@ -473,6 +485,8 @@ impl BackendAdapter for ClickHouseAdapter {
                         .get(feature_name)
                         .map(|r| r.expected_type.clone())
                         .unwrap_or(DataType::Utf8);
+
+                    tracing::debug!("Feature: {}, Raw value: '{}', Expected type: {:?}", feature_name, raw_value, expected_type);
 
                     let converted_value = if raw_value.is_empty() || raw_value == "NULL" {
                         None
@@ -542,10 +556,10 @@ mod tests {
     #[test]
     fn test_validate_connection_string() {
         assert!(
-            ClickHouseAdapter::validate_connection_string("clickhouse://localhost:9000").is_ok()
+            ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok()
         );
         assert!(
-            ClickHouseAdapter::validate_connection_string("clickhousedb://user:pass@host:9000/db")
+            ClickHouseAdapter::validate_connection_string("https://user:pass@host:8123")
                 .is_ok()
         );
         assert!(ClickHouseAdapter::validate_connection_string("").is_err());
@@ -556,23 +570,23 @@ mod tests {
     #[test]
     fn test_extract_database_name() {
         assert_eq!(
-            ClickHouseAdapter::extract_database_name("clickhouse://localhost:9000/quiver_test")
+            ClickHouseAdapter::extract_database_name("http://localhost:8123?database=quiver_test")
                 .unwrap(),
             "quiver_test"
         );
         assert_eq!(
-            ClickHouseAdapter::extract_database_name("clickhouse://user:pass@localhost:9000/my_db")
+            ClickHouseAdapter::extract_database_name("http://localhost:8123?database=my_db")
                 .unwrap(),
             "my_db"
         );
         assert_eq!(
-            ClickHouseAdapter::extract_database_name("clickhousedb://localhost:9000/test_db")
+            ClickHouseAdapter::extract_database_name("https://localhost:8123?database=test_db")
                 .unwrap(),
             "test_db"
         );
         assert_eq!(
-            ClickHouseAdapter::extract_database_name("clickhouse://localhost:9000").unwrap(),
-            "default"
+            ClickHouseAdapter::extract_database_name("http://localhost:8123").unwrap(),
+            "quiver_test"
         );
     }
 
@@ -605,7 +619,7 @@ mod tests {
     #[test]
     fn test_build_current_state_query() {
         assert!(
-            ClickHouseAdapter::validate_connection_string("clickhouse://localhost:9000").is_ok()
+            ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok()
         );
     }
 
