@@ -448,20 +448,20 @@ impl BackendAdapter for ClickHouseAdapter {
             AdapterError::internal(BACKEND_NAME, format!("Failed to create builder: {}", e))
         })?;
 
-        let result_string = tokio::time::timeout(timeout_duration, async {
+        let rows_text = tokio::time::timeout(timeout_duration, async {
             client
                 .query(&query)
                 .fetch_all::<String>()
                 .await
-                .map_err(|e| {
-                    AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
-                })
         })
         .await
         .map_err(|_| AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64))?
         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
 
-        for line in result_string {
+        for line in rows_text {
+            if line.is_empty() {
+                continue;
+            }
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.is_empty() {
                 continue;
