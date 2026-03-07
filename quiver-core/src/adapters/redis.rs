@@ -345,7 +345,8 @@ impl BackendAdapter for RedisAdapter {
         let query_future = async {
             // Split entity keys into chunks
             let entity_key_chunks: Vec<_> = entity_keys.chunks(self.mget_chunk_size).collect();
-            let entity_mapping_chunks: Vec<_> = entity_key_mapping.chunks(self.mget_chunk_size).collect();
+            let entity_mapping_chunks: Vec<_> =
+                entity_key_mapping.chunks(self.mget_chunk_size).collect();
 
             // Create futures for each chunk
             let chunk_futures: Vec<_> = entity_key_chunks
@@ -366,18 +367,16 @@ impl BackendAdapter for RedisAdapter {
                                 conn.hmget(&key, &feature_names_vec).await.map_err(|e| {
                                     AdapterError::internal(
                                         BACKEND_NAME,
-                                        format!(
-                                            "Redis HMGET failed for key '{}': {}",
-                                            key, e
-                                        ),
+                                        format!("Redis HMGET failed for key '{}': {}", key, e),
                                     )
                                 })?;
                             results.push(hash_values);
                         }
 
-                        Ok::<(Vec<Vec<Option<String>>>, Vec<usize>), AdapterError>(
-                            (results, mappings_vec),
-                        )
+                        Ok::<(Vec<Vec<Option<String>>>, Vec<usize>), AdapterError>((
+                            results,
+                            mappings_vec,
+                        ))
                     }
                 })
                 .collect();
@@ -403,7 +402,9 @@ impl BackendAdapter for RedisAdapter {
             for chunk_result in chunk_results {
                 let (hash_results_per_entity, entity_indices_in_chunk) = chunk_result?;
 
-                for (chunk_entity_idx, hash_values) in hash_results_per_entity.into_iter().enumerate() {
+                for (chunk_entity_idx, hash_values) in
+                    hash_results_per_entity.into_iter().enumerate()
+                {
                     let entity_idx = entity_indices_in_chunk[chunk_entity_idx];
 
                     // hash_values is Vec<Option<String>> where each element is a feature value

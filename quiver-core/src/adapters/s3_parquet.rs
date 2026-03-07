@@ -480,15 +480,21 @@ impl BackendAdapter for S3ParquetAdapter {
     }
 
     async fn initialize(&mut self) -> Result<(), AdapterError> {
-        let _health = self.health().await;
+        let health = self.health().await;
 
-        if !_health.healthy {
-            tracing::warn!(
-                "S3/Parquet adapter health check failed: {}",
-                _health.message.unwrap_or_default()
-            );
+        if !health.healthy {
+            return Err(AdapterError::internal(
+                BACKEND_NAME,
+                format!(
+                    "Failed to initialize S3/Parquet adapter: {}",
+                    health
+                        .message
+                        .unwrap_or_else(|| "Unknown error".to_string())
+                ),
+            ));
         }
 
+        tracing::info!("S3/Parquet adapter initialized successfully");
         Ok(())
     }
 

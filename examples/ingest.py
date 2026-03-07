@@ -6,6 +6,7 @@ Usage:
   uv run ingest.py postgres
   uv run ingest.py redis
   uv run ingest.py clickhouse
+  uv run ingest.py s3
 """
 
 import argparse
@@ -14,6 +15,9 @@ from pathlib import Path
 import psycopg2
 import redis
 from clickhouse_driver import Client as ClickHouseClient
+import pandas as pd
+import pyarrow.parquet as pq
+import boto3
 
 
 def load_fixtures():
@@ -100,9 +104,58 @@ def ingest_clickhouse(fixtures):
     print(f"ClickHouse: {total} records inserted")
 
 
+def ingest_s3(fixtures):
+    """Ingest data into S3 or local filesystem as Parquet files."""
+    import os
+
+    use_s3 = os.getenv("USE_S3", "false").lower() == "true"
+
+    if use_s3:
+        bucket = os.getenv("AWS_BUCKET", "airflow-ml-platform-test")
+        region = os.getenv("AWS_REGION", "eu-central-1")
+        s3 = boto3.client("s3", region_name=region)
+        storage_uri = f"s3://{bucket}/features"
+    else:
+        local_path = "/tmp/quiver_test_data/features"
+        os.makedirs(local_path, exist_ok=True)
+        storage_uri = local_path
+
+    total = 0
+
+    for scenario_name, scenario_def in fixtures.items():
+        schema = scenario_def["schema"]
+        records = scenario_def["records"]
+
+        df_data = {
+            "entity": [r["entity"] for r in records],
+            "timestamp": [r["timestamp"] for r in records],
+        }
+        for col in schema.keys():
+            df_data[col] = [r.get(col, "") for r in records]
+
+        df = pd.DataFrame(df_data)
+
+        for col in schema.keys():
+            col_df = df[["entity", "timestamp", col]].copy()
+            col_df.columns = ["entity", "timestamp", "value"]
+
+            if use_s3:
+                s3_key = f"features/{col}.parquet"
+                parquet_bytes = col_df.to_parquet(index=False)
+                s3.put_object(Bucket=bucket, Key=s3_key, Body=parquet_bytes)
+            else:
+                file_path = os.path.join(storage_uri, f"{col}.parquet")
+                col_df.to_parquet(file_path, index=False)
+
+            total += 1
+            print(f"  Written {col}.parquet")
+
+    print(f"S3/Parquet: {total} feature files written to {storage_uri}/")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest test data into feature store")
-    parser.add_argument("engine", choices=["postgres", "redis", "clickhouse"], help="Target adapter")
+    parser.add_argument("engine", choices=["postgres", "redis", "clickhouse", "s3"], help="Target adapter")
     args = parser.parse_args()
 
     fixtures = load_fixtures()
@@ -114,6 +167,8 @@ def main():
             ingest_redis(fixtures)
         elif args.engine == "clickhouse":
             ingest_clickhouse(fixtures)
+        elif args.engine == "s3":
+            ingest_s3(fixtures)
     except Exception as e:
         print(f"Error: {e}")
         exit(1)

@@ -477,10 +477,13 @@ impl Config {
 
             // Parse substituted config as YAML
             let config_value: serde_yaml::Value = serde_yaml::from_str(&substituted)?;
-            builder = builder.add_source(config::File::from_str(
-                &serde_yaml::to_string(&config_value)?,
-                config::FileFormat::Yaml,
-            ).required(true));
+            builder = builder.add_source(
+                config::File::from_str(
+                    &serde_yaml::to_string(&config_value)?,
+                    config::FileFormat::Yaml,
+                )
+                .required(true),
+            );
         } else {
             builder = builder.add_source(config::File::with_name("config").required(false));
         }
@@ -793,7 +796,10 @@ adapters:
         let config_str = r#"connection_string: "${USER}:${PASS}@${HOST}:5432""#;
         let result = substitute_env_vars(config_str).expect("Substitution failed");
 
-        assert_eq!(result, r#"connection_string: "testuser:testpass@localhost:5432""#);
+        assert_eq!(
+            result,
+            r#"connection_string: "testuser:testpass@localhost:5432""#
+        );
 
         unsafe {
             std::env::remove_var("USER");
