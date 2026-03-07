@@ -66,7 +66,7 @@ impl ClickHouseAdapter {
         let timeout_duration = timeout.unwrap_or(Duration::from_secs(30));
 
         info!(
-            "Successfully initialized ClickHouse adapter with {} max connections",
+            "ClickHouse adapter created with {} max connections",
             max_connections.unwrap_or(20)
         );
 
@@ -477,11 +477,13 @@ impl BackendAdapter for ClickHouseAdapter {
 
     async fn health(&self) -> HealthStatus {
         let start = std::time::Instant::now();
-        let healthy = tokio::time::timeout(self.health_timeout, async {
-            self.client.query("SELECT 1").execute().await.is_ok()
-        })
-        .await
-        .is_ok();
+        let healthy = matches!(
+            tokio::time::timeout(self.health_timeout, async {
+                self.client.query("SELECT 1").execute().await
+            })
+            .await,
+            Ok(Ok(_))
+        );
 
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
 
@@ -501,7 +503,12 @@ impl BackendAdapter for ClickHouseAdapter {
     }
 
     async fn initialize(&mut self) -> Result<(), AdapterError> {
-        // Verify connection by attempting a simple query
+        let health = self.health().await;
+        info!("ClickHouse health check: healthy={}, message={:?}", health.healthy, health.message);
+        if !health.healthy {
+            let error_msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
+            return Err(AdapterError::connection_failed(BACKEND_NAME, error_msg));
+        }
         info!("ClickHouse adapter initialized successfully");
         Ok(())
     }
