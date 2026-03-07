@@ -73,9 +73,9 @@ def main():
                 feature_names = [col["name"] for col in columns]
 
                 sample_entities = [
-                    f"{entity_type}:101",
-                    f"{entity_type}:102",
-                    f"{entity_type}:103",
+                    f"{entity_type}:1000",
+                    f"{entity_type}:1001",
+                    f"{entity_type}:1002",
                 ]
 
                 print(f"\n  View: {view_name}")

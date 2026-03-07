@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::datatypes::DataType;
@@ -256,14 +255,21 @@ impl ClickHouseAdapter {
         table_name: &str,
         entity_ids: &[String],
         entity_key: &str,
+        feature_names: &[String],
     ) -> String {
         let quoted_entity_key = Self::quote_identifier(entity_key);
         let quoted_table_name = Self::quote_identifier(table_name);
         let entity_list = Self::build_entity_list(entity_ids);
 
+        let feature_columns = feature_names
+            .iter()
+            .map(|f| Self::quote_identifier(f))
+            .collect::<Vec<_>>()
+            .join(", ");
+
         format!(
-            "SELECT {} as entity_id, * EXCEPT entity_id FROM {} WHERE {} IN ({})",
-            quoted_entity_key, quoted_table_name, quoted_entity_key, entity_list
+            "SELECT {} as entity_id, {} FROM {} WHERE {} IN ({})",
+            quoted_entity_key, feature_columns, quoted_table_name, quoted_entity_key, entity_list
         )
     }
 
@@ -274,23 +280,32 @@ impl ClickHouseAdapter {
         entity_ids: &[String],
         entity_key: &str,
         as_of: DateTime<Utc>,
+        feature_names: &[String],
     ) -> String {
         let quoted_entity_key = Self::quote_identifier(entity_key);
         let quoted_table_name = Self::quote_identifier(table_name);
         let entity_list = Self::build_entity_list(entity_ids);
         let as_of_str = as_of.format("%Y-%m-%d %H:%M:%S").to_string();
 
+        let feature_columns = feature_names
+            .iter()
+            .map(|f| Self::quote_identifier(f))
+            .collect::<Vec<_>>()
+            .join(", ");
+
         format!(
-            "SELECT {} as entity_id, * EXCEPT entity_id, rn FROM (
+            "SELECT {} as entity_id, {} FROM (
                 SELECT
                     {},
-                    *,
+                    {},
                     ROW_NUMBER() OVER (PARTITION BY {} ORDER BY feature_ts DESC) as rn
                 FROM {}
                 WHERE {} IN ({}) AND feature_ts <= '{}'
             ) WHERE rn = 1",
             quoted_entity_key,
+            feature_columns,
             quoted_entity_key,
+            feature_columns,
             quoted_entity_key,
             quoted_table_name,
             quoted_entity_key,
@@ -325,36 +340,139 @@ impl BackendAdapter for ClickHouseAdapter {
             ));
         }
 
-        let _timeout = timeout.unwrap_or(self.timeout_default);
+        let fallback_resolutions: std::collections::HashMap<String, super::FeatureResolution> =
+            feature_names
+                .iter()
+                .map(|name| {
+                    (
+                        name.clone(),
+                        super::FeatureResolution {
+                            expected_type: DataType::Utf8,
+                            source_path: None,
+                        },
+                    )
+                })
+                .collect();
 
-        let feature_name = &feature_names[0];
-        let table_name = self.resolve_table_name(feature_name, None)?;
+        self.get_with_resolutions(
+            entity_ids,
+            feature_names,
+            entity_key,
+            &fallback_resolutions,
+            as_of,
+            timeout,
+        )
+        .await
+    }
 
-        let _query = if let Some(as_of_time) = as_of {
-            self.build_temporal_query(&table_name, entity_ids, entity_key, as_of_time)
-        } else {
-            self.build_current_state_query(&table_name, entity_ids, entity_key)
-        };
-        let mut columns = vec![];
-        let mut fields = vec![];
-
-        for feature_name in feature_names {
-            let dtype = DataType::Float64;
-            fields.push(arrow::datatypes::Field::new(
-                feature_name,
-                dtype.clone(),
-                true,
+    #[allow(clippy::too_many_arguments)]
+    async fn get_with_resolutions(
+        &self,
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        resolutions: &HashMap<String, super::FeatureResolution>,
+        as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
+    ) -> Result<RecordBatch, AdapterError> {
+        if entity_ids.is_empty() || feature_names.is_empty() {
+            return Err(AdapterError::invalid(
+                BACKEND_NAME,
+                "entity_ids and feature_names cannot be empty",
             ));
-            let null_values: Vec<Option<ScalarValue>> =
-                vec![Some(ScalarValue::Null); entity_ids.len()];
-            let (_, array) = super::utils::build_column(feature_name, &dtype, &null_values)
-                .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))?;
-            columns.push(array);
         }
 
-        let schema = arrow::datatypes::Schema::new(fields);
-        RecordBatch::try_new(Arc::new(schema), columns)
-            .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))
+        let timeout_duration = timeout.unwrap_or(self.timeout_default);
+        let feature_name = &feature_names[0];
+        let source_path = resolutions
+            .get(feature_name)
+            .and_then(|r| r.source_path.as_ref());
+        let table_name = self.resolve_table_name(feature_name, source_path)?;
+
+        let query = if let Some(as_of_time) = as_of {
+            self.build_temporal_query(&table_name, entity_ids, entity_key, as_of_time, feature_names)
+        } else {
+            self.build_current_state_query(&table_name, entity_ids, entity_key, feature_names)
+        };
+
+        let client = self.client.clone();
+
+        let mut entity_index = std::collections::HashMap::new();
+        for (idx, id) in entity_ids.iter().enumerate() {
+            entity_index.insert(id.clone(), idx);
+        }
+
+        let mut builder = super::utils::StreamingRecordBatchBuilder::new(
+            entity_ids,
+            feature_names,
+            entity_key,
+        )
+        .map_err(|e| {
+            AdapterError::internal(
+                BACKEND_NAME,
+                format!("Failed to create builder: {}", e),
+            )
+        })?;
+
+        let rows_result = tokio::time::timeout(
+            timeout_duration,
+            async {
+                client
+                    .query(&query)
+                    .fetch_all::<Vec<String>>()
+                    .await
+                    .map_err(|e| {
+                        AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
+                    })
+            },
+        )
+        .await
+        .map_err(|_| {
+            AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64)
+        })?
+        .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
+
+        for row in rows_result {
+            if row.is_empty() {
+                continue;
+            }
+
+            let entity_id = &row[0];
+
+            if let Some(entity_idx) = entity_index.get(entity_id) {
+                for (feature_idx, feature_name) in feature_names.iter().enumerate() {
+                    let raw_value = if feature_idx + 1 < row.len() {
+                        row[feature_idx + 1].clone()
+                    } else {
+                        String::new()
+                    };
+
+                    let expected_type = resolutions
+                        .get(feature_name)
+                        .map(|r| r.expected_type.clone())
+                        .unwrap_or(DataType::Utf8);
+
+                    let converted_value = if raw_value.is_empty() || raw_value == "NULL" {
+                        None
+                    } else {
+                        Self::convert_value(&raw_value, &expected_type)
+                    };
+
+                    builder
+                        .set_value(feature_idx, *entity_idx, converted_value)
+                        .map_err(|e| {
+                            AdapterError::internal(
+                                BACKEND_NAME,
+                                format!("Failed to set value: {}", e),
+                            )
+                        })?;
+                }
+            }
+        }
+
+        builder.finish().map_err(|e| {
+            AdapterError::internal(BACKEND_NAME, format!("Failed to finish builder: {}", e))
+        })
     }
 
     async fn health(&self) -> HealthStatus {
