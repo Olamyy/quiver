@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{Column, PgPool, Row, TypeInfo, postgres::PgRow};
+use tokio::sync::RwLock;
 use tracing::info;
 
 use super::utils::{ScalarValue, build_record_batch, convert_raw_to_scalar, validation};
@@ -24,8 +26,9 @@ pub struct PostgresAdapter {
     table_template: String,
     max_batch_size: usize,
     timeout_default: Duration,
-    /// Internal timeout used for health checks to avoid hanging health endpoints.
     health_timeout: Duration,
+    capabilities: AdapterCapabilities,
+    table_name_cache: RwLock<HashMap<String, String>>,
 }
 
 impl PostgresAdapter {
@@ -81,12 +84,18 @@ impl PostgresAdapter {
             max_connections.unwrap_or(20)
         );
 
+        let max_batch_size = 1_000;
+        let mut capabilities = Self::static_capabilities();
+        capabilities.max_batch_size = Some(max_batch_size);
+
         Ok(Self {
             pool,
             table_template: table_template.to_string(),
-            max_batch_size: 1_000,
+            max_batch_size,
             timeout_default: timeout_duration,
             health_timeout: Duration::from_secs(3),
+            capabilities,
+            table_name_cache: RwLock::new(HashMap::new()),
         })
     }
 
@@ -300,6 +309,12 @@ impl PostgresAdapter {
     /// - `{feature}` -> feature name
     /// - `{entity_type}` -> entity type (extracted from entity_id prefix if available)
     fn build_table_name(&self, feature_name: &str) -> Result<String, AdapterError> {
+        if let Ok(cache) = self.table_name_cache.try_read() {
+            if let Some(cached) = cache.get(feature_name) {
+                return Ok(cached.clone());
+            }
+        }
+
         Self::validate_identifier(feature_name)?;
 
         let table_name = self
@@ -308,6 +323,11 @@ impl PostgresAdapter {
             .replace("{entity_type}", "default");
 
         Self::validate_identifier(&table_name)?;
+
+        if let Ok(mut cache) = self.table_name_cache.try_write() {
+            cache.insert(feature_name.to_string(), table_name.clone());
+        }
+
         Ok(table_name)
     }
 
@@ -351,51 +371,118 @@ impl PostgresAdapter {
         column: &str,
         expected_type: &DataType,
     ) -> Result<Option<ScalarValue>, AdapterError> {
-        match expected_type {
-            DataType::Float64 => {
-                if let Ok(value) = row.try_get::<Option<f64>, _>(column) {
-                    return Ok(value.map(ScalarValue::Float64));
-                }
-                if let Ok(value) = row.try_get::<Option<i32>, _>(column) {
-                    return Ok(value.map(|v| ScalarValue::Float64(v as f64)));
-                }
-                if let Ok(value) = row.try_get::<Option<i64>, _>(column) {
-                    return Ok(value.map(|v| ScalarValue::Float64(v as f64)));
-                }
+        let column_info = match row.columns().iter().find(|col| col.name() == column) {
+            Some(info) => info,
+            None => {
+                return Err(AdapterError::internal(
+                    BACKEND_NAME,
+                    "Column not found".to_string(),
+                ));
             }
-            DataType::Int64 => {
-                if let Ok(value) = row.try_get::<Option<i64>, _>(column) {
-                    return Ok(value.map(ScalarValue::Int64));
-                }
-                if let Ok(value) = row.try_get::<Option<i32>, _>(column) {
-                    return Ok(value.map(|v| ScalarValue::Int64(v as i64)));
-                }
-                if let Ok(value) = row.try_get::<Option<i16>, _>(column) {
-                    return Ok(value.map(|v| ScalarValue::Int64(v as i64)));
-                }
-            }
-            DataType::Boolean => {
-                if let Ok(value) = row.try_get::<Option<bool>, _>(column) {
-                    return Ok(value.map(ScalarValue::Boolean));
-                }
-            }
-            DataType::Timestamp(_, _) => {
-                if let Ok(value) = row.try_get::<Option<DateTime<Utc>>, _>(column) {
-                    return Ok(value.map(ScalarValue::Timestamp));
-                }
-            }
-            DataType::Utf8 => {
-                if let Ok(value) = row.try_get::<Option<String>, _>(column) {
-                    return Ok(value.map(ScalarValue::Utf8));
-                }
-            }
-            _ => {}
-        }
+        };
 
-        Err(AdapterError::internal(
-            BACKEND_NAME,
-            "Native type extraction failed, falling back to string conversion".to_string(),
-        ))
+        let pg_type_oid = column_info.type_info().clone();
+        let type_name = pg_type_oid.name();
+
+        match (expected_type, type_name) {
+            (DataType::Float64, "FLOAT8" | "FLOAT4" | "NUMERIC") => {
+                if let Ok(value) = row.try_get::<Option<f64>, _>(column) {
+                    Ok(value.map(ScalarValue::Float64))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Float extraction failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Float64, "INT8" | "BIGINT") => {
+                if let Ok(value) = row.try_get::<Option<i64>, _>(column) {
+                    Ok(value.map(|v| ScalarValue::Float64(v as f64)))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Int64 to Float64 conversion failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Float64, "INT4" | "INTEGER") => {
+                if let Ok(value) = row.try_get::<Option<i32>, _>(column) {
+                    Ok(value.map(|v| ScalarValue::Float64(v as f64)))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Int32 to Float64 conversion failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Int64, "INT8" | "BIGINT") => {
+                if let Ok(value) = row.try_get::<Option<i64>, _>(column) {
+                    Ok(value.map(ScalarValue::Int64))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Int64 extraction failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Int64, "INT4" | "INTEGER") => {
+                if let Ok(value) = row.try_get::<Option<i32>, _>(column) {
+                    Ok(value.map(|v| ScalarValue::Int64(v as i64)))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Int32 to Int64 conversion failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Int64, "INT2" | "SMALLINT") => {
+                if let Ok(value) = row.try_get::<Option<i16>, _>(column) {
+                    Ok(value.map(|v| ScalarValue::Int64(v as i64)))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Int16 to Int64 conversion failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Boolean, "BOOL" | "BOOLEAN") => {
+                if let Ok(value) = row.try_get::<Option<bool>, _>(column) {
+                    Ok(value.map(ScalarValue::Boolean))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Boolean extraction failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Timestamp(_, _), "TIMESTAMP" | "TIMESTAMPTZ") => {
+                if let Ok(value) = row.try_get::<Option<DateTime<Utc>>, _>(column) {
+                    Ok(value.map(ScalarValue::Timestamp))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "Timestamp extraction failed".to_string(),
+                    ))
+                }
+            }
+            (DataType::Utf8, "TEXT" | "VARCHAR" | "CHAR") => {
+                if let Ok(value) = row.try_get::<Option<String>, _>(column) {
+                    Ok(value.map(ScalarValue::Utf8))
+                } else {
+                    Err(AdapterError::internal(
+                        BACKEND_NAME,
+                        "String extraction failed".to_string(),
+                    ))
+                }
+            }
+            _ => Err(AdapterError::internal(
+                BACKEND_NAME,
+                format!(
+                    "Unsupported type conversion from PostgreSQL {} to Arrow {:?}",
+                    type_name, expected_type
+                ),
+            )),
+        }
     }
 
     fn record_batch_entity_id_index(entity_ids: &[String]) -> HashMap<&str, usize> {
@@ -427,81 +514,100 @@ impl PostgresAdapter {
 
         let timeout_duration = timeout.unwrap_or(self.timeout_default);
         let cutoff = as_of.unwrap_or_else(Utc::now);
-        let mut feature_results: HashMap<String, Vec<Option<ScalarValue>>> = HashMap::new();
-        let entity_index = Self::record_batch_entity_id_index(entity_ids);
+        let entity_index = Arc::new(Self::record_batch_entity_id_index(entity_ids));
 
-        for feature_name in feature_names {
-            let table_name = self.build_table_name(feature_name)?;
+        let query_preparation_results: Result<Vec<_>, AdapterError> = feature_names
+            .iter()
+            .enumerate()
+            .map(|(feature_index, feature_name)| {
+                let table_name = self.build_table_name(feature_name)?;
+                let expected_type = expected_types
+                    .get(feature_name)
+                    .cloned()
+                    .unwrap_or(DataType::Utf8);
+                
+                let query = format!(
+                    r#"
+                    WITH ranked_features AS (
+                        SELECT
+                            {entity_key},
+                            {col} as feature_value,
+                            feature_ts,
+                            ROW_NUMBER() OVER (PARTITION BY {entity_key} ORDER BY feature_ts DESC) as rn
+                        FROM {table}
+                        WHERE {entity_key} = ANY($1)
+                          AND feature_ts <= $2
+                          AND {col} IS NOT NULL
+                    )
+                    SELECT {entity_key}, feature_value
+                    FROM ranked_features
+                    WHERE rn = 1
+                    "#,
+                    entity_key = entity_key,
+                    col = feature_name,
+                    table = table_name,
+                );
+                
+                Ok((feature_index, query, expected_type, feature_name.to_string()))
+            })
+            .collect();
 
-            let expected_type = expected_types
-                .get(feature_name)
-                .cloned()
-                .unwrap_or(DataType::Utf8);
+        let query_data = query_preparation_results?;
 
-            let query = format!(
-                r#"
-                WITH ranked_features AS (
-                    SELECT
-                        {entity_key},
-                        {col} as feature_value,
-                        feature_ts,
-                        ROW_NUMBER() OVER (PARTITION BY {entity_key} ORDER BY feature_ts DESC) as rn
-                    FROM {table}
-                    WHERE {entity_key} = ANY($1)
-                      AND feature_ts <= $2
-                      AND {col} IS NOT NULL
-                )
-                SELECT {entity_key}, feature_value
-                FROM ranked_features
-                WHERE rn = 1
-                "#,
-                entity_key = entity_key,
-                col = feature_name,
-                table = table_name,
-            );
+        let query_futures: Vec<_> = query_data
+            .into_iter()
+            .map(|(feature_index, query, expected_type, feature_name)| {
+                let entity_index = Arc::clone(&entity_index);
 
-            let mut feature_values: Vec<Option<ScalarValue>> = vec![None; entity_ids.len()];
-            let query_future = sqlx::query(&query)
-                .bind(entity_ids)
-                .bind(cutoff)
-                .fetch_all(&self.pool);
+                async move {
+                    let query_future = sqlx::query(&query)
+                        .bind(entity_ids)
+                        .bind(cutoff)
+                        .fetch_all(&self.pool);
 
-            let rows = tokio::time::timeout(timeout_duration, query_future)
-                .await
-                .map_err(|_| {
-                    AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64)
-                })?
-                .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
-
-            for row in rows {
-                let entity_id: String = row
-                    .try_get(entity_key)
-                    .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
-
-                if let Some(&pos) = entity_index.get(entity_id.as_str()) {
-                    let value = self
-                        .extract_scalar_from_row(
-                            &row,
-                            "feature_value",
-                            &expected_type,
-                            feature_name,
-                        )
+                    let rows = tokio::time::timeout(timeout_duration, query_future)
+                        .await
+                        .map_err(|_| {
+                            AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64)
+                        })?
                         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
-                    feature_values[pos] = value;
-                }
-            }
 
-            feature_results.insert(feature_name.clone(), feature_values);
+                    let mut feature_values: Vec<Option<ScalarValue>> = vec![None; entity_ids.len()];
+
+                    for row in rows {
+                        let entity_id: String = row
+                            .try_get(entity_key)
+                            .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
+
+                        if let Some(&pos) = entity_index.get(entity_id.as_str()) {
+                            let value = self
+                                .extract_scalar_from_row(
+                                    &row,
+                                    "feature_value",
+                                    &expected_type,
+                                    &feature_name,
+                                )
+                                .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
+                            feature_values[pos] = value;
+                        }
+                    }
+
+                    Ok::<_, AdapterError>((feature_index, feature_values))
+                }
+            })
+            .collect();
+
+        let results = futures::future::join_all(query_futures).await;
+
+        let mut resolved: Vec<Option<Vec<Option<ScalarValue>>>> = vec![None; feature_names.len()];
+        for result in results {
+            let (feature_index, feature_values) = result?;
+            resolved[feature_index] = Some(feature_values);
         }
 
-        let resolved: Vec<Vec<Option<ScalarValue>>> = feature_names
-            .iter()
-            .map(|fname| {
-                feature_results
-                    .get(fname)
-                    .cloned()
-                    .unwrap_or_else(|| vec![None; entity_ids.len()])
-            })
+        let resolved: Vec<Vec<Option<ScalarValue>>> = resolved
+            .into_iter()
+            .map(|opt| opt.unwrap_or_else(|| vec![None; entity_ids.len()]))
             .collect();
 
         build_record_batch(entity_ids, feature_names, entity_key, resolved)
@@ -516,9 +622,7 @@ impl BackendAdapter for PostgresAdapter {
     }
 
     fn capabilities(&self) -> AdapterCapabilities {
-        let mut caps = Self::static_capabilities();
-        caps.max_batch_size = Some(self.max_batch_size);
-        caps
+        self.capabilities
     }
 
     async fn describe_schema(
@@ -632,7 +736,7 @@ mod tests {
         assert!(PostgresAdapter::validate_identifier("valid_name").is_ok());
         assert!(PostgresAdapter::validate_identifier("valid123").is_ok());
         assert!(PostgresAdapter::validate_identifier("_underscore").is_ok());
-        
+
         assert!(PostgresAdapter::validate_identifier("schema.table").is_ok());
         assert!(PostgresAdapter::validate_identifier("my_schema.my_table").is_ok());
         assert!(PostgresAdapter::validate_identifier("_schema._table").is_ok());
@@ -642,7 +746,7 @@ mod tests {
         assert!(PostgresAdapter::validate_identifier("invalid-name").is_err());
         assert!(PostgresAdapter::validate_identifier("invalid name").is_err());
         assert!(PostgresAdapter::validate_identifier("invalid;drop").is_err());
-        
+
         assert!(PostgresAdapter::validate_identifier("schema.").is_err());
         assert!(PostgresAdapter::validate_identifier(".table").is_err());
         assert!(PostgresAdapter::validate_identifier("a.b.c").is_err());

@@ -143,7 +143,7 @@ pub trait BackendAdapter: Send + Sync {
 ///
 /// This structure provides metadata about adapter behavior that allows the resolver to make
 /// informed decisions about request routing, batching, and timeout configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AdapterCapabilities {
     /// Temporal data support capabilities.
     pub temporal: TemporalCapability,
