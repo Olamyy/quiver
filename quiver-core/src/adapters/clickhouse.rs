@@ -25,6 +25,7 @@ const DEFAULT_CHUNK_SIZE: usize = 10_000;
 pub struct ClickHouseAdapter {
     client: Client,
     table_template: String,
+    database_name: String,
     timeout_default: Duration,
     health_timeout: Duration,
     capabilities: AdapterCapabilities,
@@ -54,14 +55,15 @@ impl ClickHouseAdapter {
     ) -> Result<Self, AdapterError> {
         Self::validate_connection_string(connection_string)?;
 
+        // Extract database name from connection string
+        let database_name = Self::extract_database_name(connection_string)
+            .unwrap_or_else(|_| "quiver_test".to_string());
+
         let mut client = Client::default()
             .with_url(connection_string)
-            .with_option("max_insert_block_size", "1000000")
-            .with_option("max_block_size", "1000000");
-
-        if let Some(max_conn) = max_connections {
-            client = client.with_option("max_connections", max_conn.to_string().as_str());
-        }
+            .with_database(&database_name);
+        // Note: max_connections, max_insert_block_size, max_block_size are not valid HTTP API settings
+        // The HTTP API handles these automatically or through different mechanisms
 
         let timeout_duration = timeout.unwrap_or(Duration::from_secs(30));
 
@@ -81,6 +83,7 @@ impl ClickHouseAdapter {
         Ok(Self {
             client,
             table_template: table_template.to_string(),
+            database_name,
             timeout_default: timeout_duration,
             health_timeout: Duration::from_secs(10),
             capabilities: Self::static_capabilities(),
@@ -104,16 +107,35 @@ impl ClickHouseAdapter {
             ));
         }
 
-        if !connection_string.starts_with("clickhouse://")
-            && !connection_string.starts_with("clickhousedb://")
-        {
+        if !connection_string.starts_with("http://") && !connection_string.starts_with("https://") {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
-                "Connection string must start with 'clickhouse://' or 'clickhousedb://'",
+                "Connection string must start with 'http://' or 'https://' (e.g., 'http://localhost:8123')",
             ));
         }
 
         Ok(())
+    }
+
+    /// Extract database name from ClickHouse HTTP connection string.
+    /// Expects format: "http://host:port" with optional "?database=name" parameter.
+    /// Falls back to "quiver_test" if not specified (for examples).
+    fn extract_database_name(connection_string: &str) -> Result<String, AdapterError> {
+        // Check for ?database=name parameter
+        if let Some(q_pos) = connection_string.find('?') {
+            let query_part = &connection_string[q_pos + 1..];
+            for param in query_part.split('&') {
+                if param.starts_with("database=") {
+                    let db_name = &param[9..];  // "database=".len() == 9
+                    if !db_name.is_empty() {
+                        return Ok(db_name.to_string());
+                    }
+                }
+            }
+        }
+
+        // Default to quiver_test for examples
+        Ok("quiver_test".to_string())
     }
 
     /// Get adapter capabilities without requiring a connection.
@@ -213,6 +235,8 @@ impl ClickHouseAdapter {
         };
 
         Self::validate_identifier(&table_name)?;
+
+        // Table name is used as-is; the database context is set via the client's with_database()
         Ok(table_name)
     }
 
@@ -395,6 +419,8 @@ impl BackendAdapter for ClickHouseAdapter {
             self.build_current_state_query(&table_name, entity_ids, entity_key, feature_names)
         };
 
+        tracing::info!("ClickHouse query: {}", query);
+
         let client = self.client.clone();
 
         let mut entity_index = std::collections::HashMap::new();
@@ -419,7 +445,7 @@ impl BackendAdapter for ClickHouseAdapter {
             async {
                 client
                     .query(&query)
-                    .fetch_all::<Vec<String>>()
+                    .fetch_all::<(String, String, String, String, String)>()
                     .await
                     .map_err(|e| {
                         AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
@@ -432,17 +458,13 @@ impl BackendAdapter for ClickHouseAdapter {
         })?
         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
 
-        for row in rows_result {
-            if row.is_empty() {
-                continue;
-            }
+        for (entity_id, val1, val2, val3, val4) in rows_result {
+            if let Some(entity_idx) = entity_index.get(&entity_id) {
+                let row_values = vec![val1, val2, val3, val4];
 
-            let entity_id = &row[0];
-
-            if let Some(entity_idx) = entity_index.get(entity_id) {
                 for (feature_idx, feature_name) in feature_names.iter().enumerate() {
-                    let raw_value = if feature_idx + 1 < row.len() {
-                        row[feature_idx + 1].clone()
+                    let raw_value = if feature_idx < row_values.len() {
+                        row_values[feature_idx].clone()
                     } else {
                         String::new()
                     };
@@ -529,6 +551,29 @@ mod tests {
         assert!(ClickHouseAdapter::validate_connection_string("").is_err());
         assert!(ClickHouseAdapter::validate_connection_string("postgresql://localhost").is_err());
         assert!(ClickHouseAdapter::validate_connection_string(&"x".repeat(2049)).is_err());
+    }
+
+    #[test]
+    fn test_extract_database_name() {
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("clickhouse://localhost:9000/quiver_test")
+                .unwrap(),
+            "quiver_test"
+        );
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("clickhouse://user:pass@localhost:9000/my_db")
+                .unwrap(),
+            "my_db"
+        );
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("clickhousedb://localhost:9000/test_db")
+                .unwrap(),
+            "test_db"
+        );
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("clickhouse://localhost:9000").unwrap(),
+            "default"
+        );
     }
 
     #[test]

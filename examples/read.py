@@ -2,15 +2,24 @@
 """
 Quiver end-to-end client example.
 
-Demonstrates all Quiver client capabilities by discovering server configuration
-and querying available features dynamically.
+Demonstrates querying features from any adapter by reading available features
+from server configuration and querying with standard test entities.
 
 Usage:
   uv run read.py [--server localhost:8815]
 """
 
 import argparse
+import json
+from pathlib import Path
 from quiver import Client
+
+
+def load_fixtures():
+    """Load fixture definitions to get standard test entities."""
+    fixtures_path = Path(__file__).parent / "data" / "fixtures.json"
+    with open(fixtures_path) as f:
+        return json.load(f)
 
 
 def main():
@@ -60,6 +69,8 @@ def main():
         print("FEATURE QUERIES")
         print("=" * 70)
 
+        fixtures = load_fixtures()
+
         if "registry" in server_info and "views" in server_info["registry"]:
             for view in server_info["registry"]["views"]:
                 view_name = view.get("name", "")
@@ -72,11 +83,23 @@ def main():
 
                 feature_names = [col["name"] for col in columns]
 
-                sample_entities = [
-                    f"{entity_type}:1000",
-                    f"{entity_type}:1001",
-                    f"{entity_type}:1002",
-                ]
+                # Find matching fixture scenario based on entity_type
+                scenario = None
+                for fixture_name, fixture_def in fixtures.items():
+                    if fixture_def.get("entity_type") == entity_type:
+                        scenario = fixture_def
+                        break
+
+                if scenario:
+                    # Use entities from fixtures
+                    sample_entities = [record["entity"] for record in scenario["records"]]
+                else:
+                    # Fallback: generate based on entity_type
+                    sample_entities = [
+                        f"{entity_type}:1000",
+                        f"{entity_type}:1001",
+                        f"{entity_type}:1002",
+                    ]
 
                 print(f"\n  View: {view_name}")
                 print(f"    Querying {len(sample_entities)} entities for {len(feature_names)} features")

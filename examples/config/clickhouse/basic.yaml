@@ -26,7 +26,7 @@ registry:
 adapters:
   clickhouse_adapter:
     type: clickhouse
-    connection_string: "clickhouse://default@localhost:9000/quiver_test"
+    connection_string: "http://localhost:8123"
     source_path: "ecommerce_data"
     max_connections: 10
     timeout_seconds: 30

@@ -1,49 +1,48 @@
 {
-  "scenarios": {
-    "ecommerce": {
-      "description": "E-commerce user features with temporal data",
-      "entity_key": "user_id",
-      "schema": {
-        "spend_30d": "float64",
-        "purchase_count": "int64",
-        "last_purchase_date": "timestamp",
-        "is_premium": "bool"
-      },
-      "seed_data": [
-        {"entity": "user:101", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 450.50, "purchase_count": 5, "last_purchase_date": "2025-03-05T14:30:00Z", "is_premium": true},
-        {"entity": "user:101", "timestamp": "2025-03-04T12:00:00Z", "spend_30d": 320.00, "purchase_count": 3, "last_purchase_date": "2025-03-03T10:15:00Z", "is_premium": true},
-        {"entity": "user:102", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 150.25, "purchase_count": 2, "last_purchase_date": "2025-03-06T09:45:00Z", "is_premium": false},
-        {"entity": "user:103", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 1250.00, "purchase_count": 12, "last_purchase_date": "2025-03-07T11:00:00Z", "is_premium": true}
-      ]
+  "ecommerce": {
+    "table": "ecommerce_data",
+    "entity_type": "user",
+    "entity_key": "entity",
+    "schema": {
+      "spend_30d": "float64",
+      "purchase_count": "int64",
+      "last_purchase_date": "timestamp",
+      "is_premium": "bool"
     },
-    "timeseries": {
-      "description": "Time-series sensor data with hourly measurements",
-      "entity_key": "sensor_id",
-      "schema": {
-        "temperature": "float64",
-        "humidity": "float64",
-        "alert_triggered": "bool"
-      },
-      "seed_data": [
-        {"entity": "sensor:01", "timestamp": "2025-03-07T12:00:00Z", "temperature": 22.5, "humidity": 45.3, "alert_triggered": false},
-        {"entity": "sensor:01", "timestamp": "2025-03-07T11:00:00Z", "temperature": 22.1, "humidity": 44.8, "alert_triggered": false},
-        {"entity": "sensor:02", "timestamp": "2025-03-07T12:00:00Z", "temperature": 18.5, "humidity": 60.1, "alert_triggered": true},
-        {"entity": "sensor:02", "timestamp": "2025-03-07T11:00:00Z", "temperature": 18.2, "humidity": 59.5, "alert_triggered": true}
-      ]
+    "records": [
+      {"entity": "user:1000", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 450.50, "purchase_count": 5, "last_purchase_date": "2025-03-05T14:30:00Z", "is_premium": true},
+      {"entity": "user:1001", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 150.25, "purchase_count": 2, "last_purchase_date": "2025-03-06T09:45:00Z", "is_premium": false},
+      {"entity": "user:1002", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 1250.00, "purchase_count": 12, "last_purchase_date": "2025-03-07T11:00:00Z", "is_premium": true}
+    ]
+  },
+  "timeseries": {
+    "table": "timeseries_data",
+    "entity_type": "sensor",
+    "entity_key": "entity",
+    "schema": {
+      "temperature": "float64",
+      "humidity": "float64",
+      "alert_triggered": "bool"
     },
-    "sessions": {
-      "description": "Real-time session store (current state only)",
-      "entity_key": "session_id",
-      "schema": {
-        "active_user_id": "string",
-        "request_count": "int64",
-        "last_activity": "timestamp"
-      },
-      "seed_data": [
-        {"entity": "session:101", "timestamp": "2025-03-07T12:05:30Z", "active_user_id": "user:101", "request_count": 42, "last_activity": "2025-03-07T12:05:30Z"},
-        {"entity": "session:102", "timestamp": "2025-03-07T12:03:45Z", "active_user_id": "user:102", "request_count": 15, "last_activity": "2025-03-07T12:03:45Z"},
-        {"entity": "session:103", "timestamp": "2025-03-07T12:06:00Z", "active_user_id": "user:103", "request_count": 128, "last_activity": "2025-03-07T12:06:00Z"}
-      ]
-    }
+    "records": [
+      {"entity": "sensor:1000", "timestamp": "2025-03-07T12:00:00Z", "temperature": 22.5, "humidity": 45.3, "alert_triggered": false},
+      {"entity": "sensor:1001", "timestamp": "2025-03-07T12:00:00Z", "temperature": 18.5, "humidity": 60.1, "alert_triggered": true},
+      {"entity": "sensor:1002", "timestamp": "2025-03-07T12:00:00Z", "temperature": 25.0, "humidity": 50.0, "alert_triggered": false}
+    ]
+  },
+  "sessions": {
+    "table": "sessions_data",
+    "entity_type": "session",
+    "entity_key": "entity",
+    "schema": {
+      "active_user_id": "string",
+      "request_count": "int64",
+      "last_activity": "timestamp"
+    },
+    "records": [
+      {"entity": "session:1000", "timestamp": "2025-03-07T12:05:30Z", "active_user_id": "user:1000", "request_count": 42, "last_activity": "2025-03-07T12:05:30Z"},
+      {"entity": "session:1001", "timestamp": "2025-03-07T12:03:45Z", "active_user_id": "user:1001", "request_count": 15, "last_activity": "2025-03-07T12:03:45Z"},
+      {"entity": "session:1002", "timestamp": "2025-03-07T12:06:00Z", "active_user_id": "user:1002", "request_count": 128, "last_activity": "2025-03-07T12:06:00Z"}
+    ]
   }
 }
