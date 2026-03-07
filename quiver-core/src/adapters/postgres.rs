@@ -24,7 +24,6 @@ const BACKEND_NAME: &str = "postgres";
 pub struct PostgresAdapter {
     pool: PgPool,
     table_template: String,
-    max_batch_size: usize,
     timeout_default: Duration,
     health_timeout: Duration,
     capabilities: AdapterCapabilities,
@@ -91,7 +90,6 @@ impl PostgresAdapter {
         Ok(Self {
             pool,
             table_template: table_template.to_string(),
-            max_batch_size,
             timeout_default: timeout_duration,
             health_timeout: Duration::from_secs(3),
             capabilities,
@@ -309,10 +307,10 @@ impl PostgresAdapter {
     /// - `{feature}` -> feature name
     /// - `{entity_type}` -> entity type (extracted from entity_id prefix if available)
     fn build_table_name(&self, feature_name: &str) -> Result<String, AdapterError> {
-        if let Ok(cache) = self.table_name_cache.try_read() {
-            if let Some(cached) = cache.get(feature_name) {
-                return Ok(cached.clone());
-            }
+        if let Ok(cache) = self.table_name_cache.try_read()
+            && let Some(cached) = cache.get(feature_name)
+        {
+            return Ok(cached.clone());
         }
 
         Self::validate_identifier(feature_name)?;
