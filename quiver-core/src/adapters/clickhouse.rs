@@ -285,9 +285,19 @@ impl ClickHouseAdapter {
             .collect::<Vec<_>>()
             .join(", ");
 
+        let padded_features = if feature_names.len() < 4 {
+            let mut features = feature_columns.clone();
+            for _ in feature_names.len()..4 {
+                features.push_str(", ''");
+            }
+            features
+        } else {
+            feature_columns
+        };
+
         format!(
             "SELECT {} as entity_id, {} FROM {} WHERE {} IN ({})",
-            quoted_entity_key, feature_columns, quoted_table_name, quoted_entity_key, entity_list
+            quoted_entity_key, padded_features, quoted_table_name, quoted_entity_key, entity_list
         )
     }
 
@@ -311,6 +321,16 @@ impl ClickHouseAdapter {
             .collect::<Vec<_>>()
             .join(", ");
 
+        let padded_features = if feature_names.len() < 4 {
+            let mut features = feature_columns.clone();
+            for _ in feature_names.len()..4 {
+                features.push_str(", ''");
+            }
+            features
+        } else {
+            feature_columns.clone()
+        };
+
         format!(
             "SELECT {} as entity_id, {} FROM (
                 SELECT
@@ -321,9 +341,9 @@ impl ClickHouseAdapter {
                 WHERE {} IN ({}) AND feature_ts <= '{}'
             ) WHERE rn = 1",
             quoted_entity_key,
-            feature_columns,
+            padded_features,
             quoted_entity_key,
-            feature_columns,
+            padded_features,
             quoted_entity_key,
             quoted_table_name,
             quoted_entity_key,
@@ -448,29 +468,26 @@ impl BackendAdapter for ClickHouseAdapter {
             AdapterError::internal(BACKEND_NAME, format!("Failed to create builder: {}", e))
         })?;
 
-        let rows_text = tokio::time::timeout(timeout_duration, async {
+        let rows_result = tokio::time::timeout(timeout_duration, async {
             client
                 .query(&query)
-                .fetch_all::<String>()
+                .fetch_all::<(String, String, String, String, String)>()
                 .await
+                .map_err(|e| {
+                    AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
+                })
         })
         .await
         .map_err(|_| AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64))?
         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
 
-        for line in rows_text {
-            if line.is_empty() {
-                continue;
-            }
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.is_empty() {
-                continue;
-            }
-            let entity_id = parts[0].to_string();
+        for (entity_id, val1, val2, val3, val4) in rows_result {
             if let Some(entity_idx) = entity_index.get(&entity_id) {
+                let row_values = [val1, val2, val3, val4];
+
                 for (feature_idx, feature_name) in feature_names.iter().enumerate() {
-                    let raw_value = if feature_idx + 1 < parts.len() {
-                        parts[feature_idx + 1].to_string()
+                    let raw_value = if feature_idx < row_values.len() {
+                        row_values[feature_idx].clone()
                     } else {
                         String::new()
                     };
