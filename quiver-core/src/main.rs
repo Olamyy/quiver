@@ -112,96 +112,119 @@ Loaded {} feature views and {} adapters",
         });
     }
 
-    for (name, adapter_cfg) in cfg.adapters {
-        match adapter_cfg {
-            config::AdapterConfig::Memory => {
-                let adapter = Arc::new(MemoryAdapter::new());
-                resolver.register_adapter(name, adapter as Arc<dyn BackendAdapter>);
+    let adapter_init_futures: Vec<_> = cfg
+        .adapters
+        .into_iter()
+        .map(|(name, adapter_cfg)| {
+            let validation_config = cfg.server.validation.clone();
+            async move {
+                let result: Result<(String, Arc<dyn BackendAdapter>), Box<dyn std::error::Error>> =
+                    match adapter_cfg {
+                        config::AdapterConfig::Memory => {
+                            let adapter = Arc::new(MemoryAdapter::new());
+                            Ok((name, adapter as Arc<dyn BackendAdapter>))
+                        }
+                        config::AdapterConfig::Redis {
+                            connection,
+                            password,
+                            source_path,
+                            tls,
+                            parameters,
+                        } => {
+                            let adapter = RedisAdapter::new(
+                                &connection,
+                                password.as_deref(),
+                                &source_path,
+                                None,
+                                tls.as_ref(),
+                                Some(validation_config),
+                                Some(&parameters),
+                            )
+                            .await?;
+                            Ok((name, Arc::new(adapter) as Arc<dyn BackendAdapter>))
+                        }
+                        config::AdapterConfig::Postgres {
+                            connection_string,
+                            source_path,
+                            max_connections,
+                            timeout_seconds,
+                            tls,
+                            parameters,
+                        } => {
+                            let timeout = timeout_seconds.map(Duration::from_secs);
+                            let table_template = match &source_path {
+                                quiver_core::config::SourcePath::Template(tmpl) => tmpl.as_str(),
+                                quiver_core::config::SourcePath::Structured { table, .. } => {
+                                    table.as_str()
+                                }
+                            };
+                            let mut adapter = PostgresAdapter::new(
+                                &connection_string,
+                                table_template,
+                                max_connections,
+                                timeout,
+                                tls.as_ref(),
+                                Some(validation_config),
+                                Some(&parameters),
+                            )
+                            .await?;
+
+                            adapter.initialize().await?;
+
+                            Ok((name, Arc::new(adapter) as Arc<dyn BackendAdapter>))
+                        }
+                        config::AdapterConfig::S3Parquet(s3_cfg) => {
+                            let mut adapter = S3ParquetAdapter::new(
+                                &s3_cfg,
+                                Some(validation_config),
+                            )
+                            .await?;
+
+                            adapter.initialize().await?;
+
+                            Ok((name, Arc::new(adapter) as Arc<dyn BackendAdapter>))
+                        }
+                        config::AdapterConfig::ClickHouse {
+                            connection_string,
+                            source_path,
+                            max_connections,
+                            timeout_seconds,
+                            tls,
+                            parameters,
+                        } => {
+                            let timeout = timeout_seconds.map(Duration::from_secs);
+                            let table_template = match &source_path {
+                                quiver_core::config::SourcePath::Template(tmpl) => tmpl.as_str(),
+                                quiver_core::config::SourcePath::Structured { table, .. } => {
+                                    table.as_str()
+                                }
+                            };
+                            let mut adapter = ClickHouseAdapter::new(
+                                &connection_string,
+                                table_template,
+                                max_connections,
+                                timeout,
+                                tls.as_ref(),
+                                Some(validation_config),
+                                Some(&parameters),
+                            )
+                            .await?;
+
+                            adapter.initialize().await?;
+
+                            Ok((name, Arc::new(adapter) as Arc<dyn BackendAdapter>))
+                        }
+                    };
+                result
             }
-            config::AdapterConfig::Redis {
-                connection,
-                password,
-                source_path,
-                tls,
-                parameters,
-            } => {
-                let adapter = RedisAdapter::new(
-                    &connection,
-                    password.as_deref(),
-                    &source_path,
-                    None,
-                    tls.as_ref(),
-                    Some(cfg.server.validation.clone()),
-                    Some(&parameters),
-                )
-                .await?;
-                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
-            }
-            config::AdapterConfig::Postgres {
-                connection_string,
-                source_path,
-                max_connections,
-                timeout_seconds,
-                tls,
-                parameters,
-            } => {
-                let timeout = timeout_seconds.map(Duration::from_secs);
-                let table_template = match &source_path {
-                    quiver_core::config::SourcePath::Template(tmpl) => tmpl.as_str(),
-                    quiver_core::config::SourcePath::Structured { table, .. } => table.as_str(),
-                };
-                let mut adapter = PostgresAdapter::new(
-                    &connection_string,
-                    table_template,
-                    max_connections,
-                    timeout,
-                    tls.as_ref(),
-                    Some(cfg.server.validation.clone()),
-                    Some(&parameters),
-                )
-                .await?;
+        })
+        .collect();
 
-                adapter.initialize().await?;
+    let adapter_results = futures::future::join_all(adapter_init_futures).await;
 
-                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
-            }
-            config::AdapterConfig::S3Parquet(s3_cfg) => {
-                let mut adapter =
-                    S3ParquetAdapter::new(&s3_cfg, Some(cfg.server.validation.clone())).await?;
-
-                adapter.initialize().await?;
-
-                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
-            }
-            config::AdapterConfig::ClickHouse {
-                connection_string,
-                source_path,
-                max_connections,
-                timeout_seconds,
-                tls,
-                parameters,
-            } => {
-                let timeout = timeout_seconds.map(Duration::from_secs);
-                let table_template = match &source_path {
-                    quiver_core::config::SourcePath::Template(tmpl) => tmpl.as_str(),
-                    quiver_core::config::SourcePath::Structured { table, .. } => table.as_str(),
-                };
-                let mut adapter = ClickHouseAdapter::new(
-                    &connection_string,
-                    table_template,
-                    max_connections,
-                    timeout,
-                    tls.as_ref(),
-                    Some(cfg.server.validation.clone()),
-                    Some(&parameters),
-                )
-                .await?;
-
-                adapter.initialize().await?;
-
-                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
-            }
-        }
+    for result in adapter_results {
+        let (name, adapter) = result?;
+        resolver.register_adapter(name, adapter);
     }
 
     let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone(), filtered_config);
