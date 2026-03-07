@@ -1,5 +1,7 @@
 pub mod memory;
+pub mod postgres;
 pub mod redis;
+pub mod utils;
 
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -8,16 +10,22 @@ use std::time::Duration;
 
 /// Standardized backend adapter interface.
 ///
-/// This trait defines the contract that all backend adapters must implement
-/// to ensure consistent behavior across different storage systems. The interface
-/// is designed to prevent divergent implementations that could cause operational
-/// issues at scale.
+/// This trait defines the contract that all backend adapters must implement to ensure
+/// consistent behavior across different storage systems.
 ///
-/// # Design Principles
-/// - **Schema consistency**: All adapters must return the same Arrow schema for the same features
-/// - **Timeout behavior**: All operations must respect timeout parameters
-/// - **Batching semantics**: Adapters must declare their batching capabilities and limits
-/// - **Error propagation**: Standardized error types with backend context
+/// ## Design principles
+/// - **Schema consistency**: For a given `(feature set, feature definitions)` adapters must produce
+///   the same Arrow schema and column types.
+/// - **Timeout behavior**: Operations must respect explicit timeouts and apply safe defaults
+///   when timeouts are not provided.
+/// - **Batching semantics**: Adapters declare limits and optimal sizes; callers may split requests
+///   accordingly. Adapters should also avoid pathological per-row round-trips.
+/// - **Error propagation**: Standardized error types with backend context.
+///
+/// ## Important note on schema consistency
+/// Arrow type stability cannot be guaranteed if each adapter independently infers types from its
+/// backend. To make schema consistency enforceable at scale, you typically need a single source
+/// of truth for feature typing (e.g., a registry or a `FeatureSpec` passed in by the caller).
 #[async_trait::async_trait]
 pub trait BackendAdapter: Send + Sync {
     /// Backend identifier used in logs and error messages.
@@ -28,135 +36,172 @@ pub trait BackendAdapter: Send + Sync {
 
     /// Describe the Arrow schema for the given feature names.
     ///
-    /// This method must return a consistent schema for the same feature set.
-    /// Schema changes should be handled through versioning mechanisms.
+    /// The returned schema must be stable and match what `get()` returns for the same feature set.
     ///
-    /// # Errors
-    /// - `AdapterError::InvalidRequest` if feature names are unknown
-    /// - `AdapterError::Internal` if schema introspection fails
-    async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError>;
+    /// ### Missing / unknown features
+    /// Each adapter must implement a deterministic policy for unknown features. Recommended:
+    /// - **Strict**: return `AdapterError::InvalidRequest` when a feature is unknown/unresolvable.
+    /// - **Lenient** (allowed but discouraged): return a schema using a stable fallback type.
+    ///
+    /// If you choose lenient behavior, it must be *stable across time* and *consistent across adapters*,
+    /// otherwise the "schema consistency" principle is violated.
+    async fn describe_schema(
+        &self,
+        feature_names: &[String],
+        entity_key: &str,
+    ) -> Result<Schema, AdapterError>;
 
     /// Fetch features for entities with optional timeout.
     ///
     /// The returned RecordBatch must:
-    /// - Have exactly one row per entity_id in the same order as requested
+    /// - Have exactly one row per `entity_id` in the same order as requested
     /// - Include all requested feature columns, null-filled if missing
-    /// - Match the schema from `describe_schema` for the same feature set
+    /// - Match the schema from `describe_schema()` for the same feature set
     ///
     /// # Arguments
     /// - `entity_ids` - Entity identifiers to fetch features for
     /// - `feature_names` - Feature names to retrieve
-    /// - `as_of` - Point-in-time for temporal queries (None = current time)
-    /// - `timeout` - Maximum time to wait for response (None = adapter default)
+    /// - `entity_key` - The column name used as entity identifier (e.g. "user_id", "entity_id")
+    /// - `as_of` - Point-in-time for temporal queries (`None` = current time)
+    /// - `timeout` - Maximum time to wait for response (`None` = adapter default)
     ///
     /// # Errors
     /// - `AdapterError::Timeout` if operation exceeds timeout
     /// - `AdapterError::InvalidRequest` for malformed requests
     /// - `AdapterError::Internal` for backend failures
+    ///
+    /// ## NotFound semantics
+    /// This API should generally **not** return `AdapterError::NotFound` for missing entities/features;
+    /// instead it should null-fill. Reserve `NotFound` for APIs where existence is required.
     async fn get(
         &self,
         entity_ids: &[String],
         feature_names: &[String],
+        entity_key: &str,
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError>;
 
-    /// Store features with optional configuration.
+    /// Fetch features for entities with explicit expected types.
+    ///
+    /// This method allows the caller to specify the expected Arrow types for each feature,
+    /// enabling type validation and conversion based on the feature registry configuration.
     ///
     /// # Arguments
-    /// - `batch` - RecordBatch with features to store
-    /// - `options` - Storage options including timeout and batch hints
+    /// - `entity_ids` - Entity identifiers to fetch features for
+    /// - `feature_names` - Feature names to retrieve  
+    /// - `entity_key` - The column name used as entity identifier
+    /// - `expected_types` - Map of feature names to expected Arrow DataTypes
+    /// - `as_of` - Point-in-time for temporal queries (`None` = current time)
+    /// - `timeout` - Maximum time to wait for response (`None` = adapter default)
     ///
-    /// # Errors
-    /// - `AdapterError::Timeout` if operation exceeds timeout
-    /// - `AdapterError::InvalidRequest` for schema mismatches
-    /// - `AdapterError::Internal` for backend failures
-    async fn put(&self, batch: RecordBatch, options: &PutOptions) -> Result<(), AdapterError>;
+    /// # Returns
+    /// RecordBatch with features converted to the expected types
+    ///
+    /// # Default Implementation
+    /// The default implementation calls `get()` and assumes the schema matches expected types.
+    /// Adapters can override this for more sophisticated type handling.
+    async fn get_with_expected_types(
+        &self,
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        _expected_types: &std::collections::HashMap<String, arrow::datatypes::DataType>,
+        as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
+    ) -> Result<RecordBatch, AdapterError> {
+        self.get(entity_ids, feature_names, entity_key, as_of, timeout)
+            .await
+    }
 
     /// Check backend health and return operational metrics.
     ///
-    /// This method should perform a lightweight operation to verify the backend
-    /// is accessible and operational. It should not perform expensive operations
-    /// that could impact serving performance.
+    /// This method should perform a lightweight operation to verify the backend is accessible.
+    ///
+    /// ### Timeout guidance
+    /// There is no timeout parameter here, so implementations should enforce a conservative internal
+    /// timeout (e.g., a few seconds) to avoid hanging health endpoints under network failure.
     async fn health(&self) -> HealthStatus;
 
     /// Initialize adapter connections and validate configuration.
     ///
-    /// Called once during startup to establish connections, validate
-    /// configuration, and perform any necessary setup operations.
-    ///
-    /// # Errors
-    /// - `AdapterError::Internal` if initialization fails
+    /// Called once during startup to establish connections, validate configuration,
+    /// and perform any necessary setup operations.
     async fn initialize(&mut self) -> Result<(), AdapterError> {
-        // Default implementation - no initialization required
         Ok(())
     }
 
     /// Clean shutdown of adapter resources.
     ///
-    /// Called during server shutdown to gracefully close connections
-    /// and clean up resources.
+    /// Called during server shutdown to gracefully close connections and clean up resources.
     async fn shutdown(&mut self) -> Result<(), AdapterError> {
-        // Default implementation - no cleanup required
         Ok(())
     }
 }
 
 /// Adapter capabilities and operational characteristics.
 ///
-/// This structure provides metadata about adapter behavior that allows
-/// the resolver to make informed decisions about request routing, batching,
-/// and timeout configuration.
-#[derive(Debug, Clone)]
+/// This structure provides metadata about adapter behavior that allows the resolver to make
+/// informed decisions about request routing, batching, and timeout configuration.
+#[derive(Debug, Clone, Copy)]
 pub struct AdapterCapabilities {
-    /// Temporal data support capabilities
+    /// Temporal data support capabilities.
     pub temporal: TemporalCapability,
 
-    /// Maximum number of entities that can be fetched in a single request
+    /// Maximum number of entities that can be fetched in a single request.
     pub max_batch_size: Option<usize>,
 
-    /// Optimal batch size for performance (used for request splitting)
+    /// Optimal batch size for performance (used for request splitting).
     pub optimal_batch_size: Option<usize>,
 
-    /// Typical latency for operations in milliseconds (used for timeout planning)
+    /// Typical latency for operations in milliseconds (used for timeout planning).
     pub typical_latency_ms: u32,
 
-    /// Whether adapter supports parallel requests for the same feature set
+    /// Whether adapter supports parallel requests for the same feature set.
     pub supports_parallel_requests: bool,
 }
 
-/// Temporal data capabilities with performance characteristics.
+/// Temporal data capability metadata.
 ///
-/// Enhanced to include latency information for timeout planning and
-/// performance optimization.
+/// Prefer keeping this enum as capability metadata and moving policy decisions (like
+/// "how recent is 'current'") into a resolver/config layer.
+///
+/// If you *do* need a helper here, avoid hard-coding thresholds that make behavior
+/// time-dependent and hard to test. Pass "now" from the caller when possible.
 #[derive(Debug, Clone, Copy)]
 pub enum TemporalCapability {
-    /// Only serves current/latest values
-    CurrentOnly { typical_latency_ms: u32 },
+    /// Only serves current/latest values.
+    CurrentOnly {
+        /// Typical latency in milliseconds.
+        typical_latency_ms: u32,
+    },
 
-    /// Serves recent values with approximate recency
+    /// Serves recent values with approximate recency.
     ApproximateRecency {
         typical_lag_seconds: u32,
         typical_latency_ms: u32,
     },
 
-    /// Full time-travel support for historical queries
+    /// Full time-travel support for historical queries.
     TimeTravel { typical_latency_ms: u32 },
 
-    /// MVCC-style range queries with transaction semantics
+    /// MVCC-style range queries with transaction semantics.
     MvccRange { typical_latency_ms: u32 },
 }
 
 impl TemporalCapability {
-    /// Check if this adapter can serve data for the given timestamp.
-    pub fn can_serve_as_of(&self, as_of: DateTime<Utc>) -> bool {
-        let age_seconds = (Utc::now() - as_of).num_seconds().max(0) as u32;
+    /// Check whether this capability can serve data for the given timestamp.
+    ///
+    /// This method is a heuristic; callers with strict correctness requirements should not rely
+    /// on it alone. Prefer making this decision in a resolver layer with configuration.
+    pub fn can_serve_as_of(&self, as_of: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+        let age_seconds = (now - as_of).num_seconds().max(0) as u32;
         match self {
             Self::CurrentOnly { .. } => age_seconds < 5,
             Self::ApproximateRecency {
                 typical_lag_seconds,
                 ..
-            } => age_seconds < typical_lag_seconds * 2,
+            } => age_seconds < typical_lag_seconds.saturating_mul(2),
             Self::TimeTravel { .. } => true,
             Self::MvccRange { .. } => true,
         }
@@ -175,31 +220,28 @@ impl TemporalCapability {
     }
 }
 
-/// Standardized health status with comprehensive operational metrics.
-///
-/// Enhanced to include additional metrics useful for operational monitoring
-/// and capacity planning.
+/// Standardized health status with operational metrics.
 #[derive(Debug, Clone)]
 pub struct HealthStatus {
-    /// Whether the backend is operational
+    /// Whether the backend is operational.
     pub healthy: bool,
 
-    /// Backend name for identification
+    /// Backend name for identification.
     pub backend: String,
 
-    /// Optional descriptive message about health status
+    /// Optional descriptive message about health status.
     pub message: Option<String>,
 
-    /// Last operation latency in milliseconds
+    /// Last operation latency in milliseconds.
     pub latency_ms: Option<f64>,
 
-    /// Timestamp of this health check
+    /// Timestamp of this health check.
     pub last_check: DateTime<Utc>,
 
-    /// Whether adapter capabilities have been verified
+    /// Whether adapter capabilities have been verified.
     pub capabilities_verified: bool,
 
-    /// Estimated request capacity (requests per second)
+    /// Estimated request capacity (requests per second).
     pub estimated_capacity: Option<f64>,
 }
 
@@ -231,41 +273,13 @@ impl HealthStatus {
     }
 }
 
-/// Options for put operations.
-///
-/// Provides standardized configuration for storage operations across
-/// all backend adapters.
-#[derive(Debug, Clone)]
-pub struct PutOptions {
-    /// Whether to upsert (update existing) or fail on conflicts
-    pub upsert: bool,
-
-    /// Hint about batch size for optimization
-    pub batch_size_hint: Option<usize>,
-
-    /// Maximum time to wait for operation completion
-    pub timeout: Option<Duration>,
-}
-
-impl Default for PutOptions {
-    fn default() -> Self {
-        Self {
-            upsert: true,
-            batch_size_hint: None,
-            timeout: None,
-        }
-    }
-}
-
 /// Standardized error types with consistent backend context.
-///
-/// Enhanced with additional error categories and improved error context
-/// for better debugging and monitoring.
 #[derive(Debug, thiserror::Error)]
 pub enum AdapterError {
     #[error("[{backend}] Internal error: {message}")]
     Internal { backend: String, message: String },
 
+    /// Reserved for APIs where existence is required. `get()` should usually null-fill instead.
     #[error("[{backend}] Entity not found: {entity_id}")]
     NotFound { backend: String, entity_id: String },
 

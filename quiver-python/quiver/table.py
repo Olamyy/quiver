@@ -5,8 +5,8 @@ from typing import List, Optional, Any, TYPE_CHECKING
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    import pandas # type: ignore
-    import numpy # type: ignore
+    import pandas  # type: ignore
+    import numpy  # type: ignore
 
 from .exceptions import QuiverValidationError
 

@@ -1,18 +1,22 @@
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
+use quiver_core::adapters::BackendAdapter;
 use quiver_core::adapters::memory::MemoryAdapter;
+use quiver_core::adapters::postgres::PostgresAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::config;
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
 use quiver_core::server::QuiverFlightServer;
 use std::sync::Arc;
+use std::time::Duration;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Path to configuration file. Can also be set via QUIVER_CONFIG environment variable.
     #[arg(short, long)]
     config: Option<String>,
 }
@@ -26,20 +30,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args = Args::parse();
-    let cfg = config::Config::load(args.config.as_deref())?;
 
-    if cfg.adapters.is_empty() {
-        return Err("Configuration error: No adapters defined".into());
-    }
+    let config_path = args.config.or_else(|| std::env::var("QUIVER_CONFIG").ok());
 
-    let (view_count, adapter_count) = (
+    if let Some(ref path) = config_path {
+        tracing::info!("Loading configuration from: {}", path);
+    } else {
+        tracing::info!("Loading configuration from default search paths");
+    };
+
+    let cfg = config::Config::load(config_path.as_deref())?;
+
+    let filtered_config = cfg.to_filtered();
+
+    tracing::info!(
+        "
+   ____        _                
+  / __ \\__  __(_)   _____  _____
+ / / / / / / / / | | / _ \\/ ___/
+/ /_/ / /_/ / /| |_| /  __/ /    
+\\___\\_\\__,_/_/ |____/\\___/_/     
+                                 
+Quiver Flight Server starting up on {}:{}
+Loaded {} feature views and {} adapters",
+        cfg.server.host,
+        cfg.server.port,
         match &cfg.registry {
-            config::RegistryConfig::Static { views } => {
-                if views.is_empty() {
-                    return Err("Configuration error: Registry contains no feature views".into());
-                }
-                views.len()
-            }
+            config::RegistryConfig::Static { views } => views.len(),
         },
         cfg.adapters.len(),
     );
@@ -81,27 +98,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match adapter_cfg {
             config::AdapterConfig::Memory => {
                 let adapter = Arc::new(MemoryAdapter::new());
-                resolver.register_adapter(
-                    name,
-                    adapter as Arc<dyn quiver_core::adapters::BackendAdapter>,
-                );
+                resolver.register_adapter(name, adapter as Arc<dyn BackendAdapter>);
             }
             config::AdapterConfig::Redis {
                 connection,
                 password,
                 key_template,
+                tls,
             } => {
-                let adapter =
-                    RedisAdapter::new(&connection, password.as_deref(), &key_template).await?;
-                resolver.register_adapter(
-                    name,
-                    Arc::new(adapter) as Arc<dyn quiver_core::adapters::BackendAdapter>,
-                );
+                let adapter = RedisAdapter::new(
+                    &connection,
+                    password.as_deref(),
+                    &key_template,
+                    tls.as_ref(),
+                )
+                .await?;
+                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
+            }
+            config::AdapterConfig::Postgres {
+                connection_string,
+                table_template,
+                max_connections,
+                timeout_seconds,
+                tls,
+            } => {
+                let timeout = timeout_seconds.map(Duration::from_secs);
+                let mut adapter = PostgresAdapter::new(
+                    &connection_string,
+                    &table_template,
+                    max_connections,
+                    timeout,
+                    tls.as_ref(),
+                )
+                .await?;
+
+                adapter.initialize().await?;
+
+                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
             }
         }
     }
 
-    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone());
+    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone(), filtered_config);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
@@ -114,22 +152,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET)
         .build_v1()?;
-
-    tracing::info!(
-        r#"
-   ____        _                
-  / __ \__  __(_)   _____  _____
- / / / / / / / / | | / _ \/ ___/
-/ /_/ / /_/ / /| |_| /  __/ /    
-\___\_\__,_/_/ |____/\___/_/     
-                                 
-Quiver Flight Server starting up on {}
-Loaded {} feature views and {} adapters
-"#,
-        addr,
-        view_count,
-        adapter_count
-    );
 
     let mut server_builder = Server::builder();
 

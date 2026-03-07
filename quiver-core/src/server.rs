@@ -10,7 +10,7 @@ use std::time::Instant;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, info};
 
-use crate::config::AccessLogConfig;
+use crate::config::{AccessLogConfig, FilteredConfig};
 use crate::proto::quiver::v1::FeatureRequest;
 use crate::resolver::Resolver;
 use arrow_flight::encode::FlightDataEncoderBuilder;
@@ -32,13 +32,19 @@ struct AccessLogData<'a> {
 pub struct QuiverFlightServer {
     resolver: Arc<Resolver>,
     access_log_config: Option<AccessLogConfig>,
+    filtered_config: FilteredConfig,
 }
 
 impl QuiverFlightServer {
-    pub fn new(resolver: Arc<Resolver>, access_log_config: Option<AccessLogConfig>) -> Self {
+    pub fn new(
+        resolver: Arc<Resolver>,
+        access_log_config: Option<AccessLogConfig>,
+        filtered_config: FilteredConfig,
+    ) -> Self {
         Self {
             resolver,
             access_log_config,
+            filtered_config,
         }
     }
 
@@ -209,23 +215,62 @@ impl FlightService for QuiverFlightServer {
         &self,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<SchemaResult>, Status> {
+        let start_time = std::time::Instant::now();
         let descriptor = request.into_inner();
         let view_name = descriptor.path.first().ok_or_else(|| {
             Status::invalid_argument("FlightDescriptor must contain a path for the feature view")
         })?;
 
-        let schema = self
-            .resolver
-            .get_arrow_schema(view_name)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to resolve schema: {}", e)))?;
+        match self.resolver.get_arrow_schema(view_name).await {
+            Ok(schema) => {
+                let field_count = schema.fields().len();
 
-        let options = arrow::ipc::writer::IpcWriteOptions::default();
-        let schema_result: SchemaResult = arrow_flight::SchemaAsIpc::new(&schema, &options)
-            .try_into()
-            .map_err(|e| Status::internal(format!("Failed to serialize schema: {}", e)))?;
-
-        Ok(Response::new(schema_result))
+                let options = arrow::ipc::writer::IpcWriteOptions::default();
+                match arrow_flight::SchemaAsIpc::new(&schema, &options).try_into() {
+                    Ok(schema_result) => {
+                        let duration = start_time.elapsed();
+                        self.log_request(AccessLogData {
+                            endpoint: "get_schema",
+                            feature_view: Some(view_name),
+                            entity_count: None,
+                            feature_count: Some(field_count),
+                            duration,
+                            status: "success",
+                            error: None,
+                        });
+                        Ok(Response::new(schema_result))
+                    }
+                    Err(e) => {
+                        let duration = start_time.elapsed();
+                        let error_msg = format!("Failed to serialize schema: {}", e);
+                        self.log_request(AccessLogData {
+                            endpoint: "get_schema",
+                            feature_view: Some(view_name),
+                            entity_count: None,
+                            feature_count: Some(field_count),
+                            duration,
+                            status: "error",
+                            error: Some(&error_msg),
+                        });
+                        Err(Status::internal(error_msg))
+                    }
+                }
+            }
+            Err(e) => {
+                let duration = start_time.elapsed();
+                let error_msg = format!("Failed to resolve schema: {}", e);
+                self.log_request(AccessLogData {
+                    endpoint: "get_schema",
+                    feature_view: Some(view_name),
+                    entity_count: None,
+                    feature_count: None,
+                    duration,
+                    status: "error",
+                    error: Some(&error_msg),
+                });
+                Err(Status::internal(error_msg))
+            }
+        }
     }
 
     type DoGetStream = Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>;
@@ -332,54 +377,15 @@ impl FlightService for QuiverFlightServer {
         }
     }
 
-    type DoPutStream = Pin<Box<dyn Stream<Item = Result<PutResult, Status>> + Send>>;
+    type DoPutStream = futures::stream::Empty<Result<PutResult, Status>>;
 
     async fn do_put(
         &self,
-        request: Request<Streaming<FlightData>>,
+        _request: Request<Streaming<FlightData>>,
     ) -> Result<Response<Self::DoPutStream>, Status> {
-        let mut stream = request.into_inner();
-
-        let first_msg = stream
-            .next()
-            .await
-            .ok_or_else(|| Status::invalid_argument("Empty stream"))??;
-        let descriptor = first_msg.flight_descriptor.as_ref().ok_or_else(|| {
-            Status::invalid_argument("First FlightData message must contain a FlightDescriptor")
-        })?;
-
-        let backend_name = descriptor
-            .path
-            .first()
-            .ok_or_else(|| {
-                Status::invalid_argument(
-                    "FlightDescriptor path must contain at least one element (backend name)",
-                )
-            })?
-            .clone();
-
-        let full_stream = futures::stream::once(async move { Ok(first_msg) })
-            .chain(stream)
-            .map(|res| {
-                res.map_err(|e| arrow_flight::error::FlightError::ExternalError(Box::new(e)))
-            });
-        let mut reader =
-            arrow_flight::decode::FlightRecordBatchStream::new_from_flight_data(full_stream);
-
-        while let Some(batch_res) = reader.next().await {
-            let batch = batch_res.map_err(|e| Status::internal(format!("Decode error: {}", e)))?;
-            self.resolver
-                .put(&backend_name, batch)
-                .await
-                .map_err(|e| Status::internal(format!("Put failed: {}", e)))?;
-        }
-
-        let res_stream = futures::stream::once(async move {
-            Ok(PutResult {
-                app_metadata: vec![].into(),
-            })
-        });
-        Ok(Response::new(Box::pin(res_stream)))
+        Err(Status::unimplemented(
+            "DoPut is not supported - Quiver is a feature serving layer, not a data ingestion service",
+        ))
     }
 
     type DoExchangeStream = Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>;
@@ -441,6 +447,25 @@ impl FlightService for QuiverFlightServer {
         info!("Received action: {}", action.r#type);
 
         match action.r#type.as_str() {
+            "get_server_info" => {
+                info!("Server info requested");
+
+                let server_info = match serde_json::to_string(&self.filtered_config) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        return Err(Status::internal(format!(
+                            "Failed to serialize server info: {}",
+                            e
+                        )));
+                    }
+                };
+
+                let res = arrow_flight::Result {
+                    body: server_info.into(),
+                };
+                let stream = futures::stream::once(async move { Ok(res) });
+                Ok(Response::new(Box::pin(stream)))
+            }
             "flush_cache" => {
                 info!("Cache flush requested (noop)");
                 let res = arrow_flight::Result {
@@ -471,6 +496,10 @@ impl FlightService for QuiverFlightServer {
         _request: Request<Empty>,
     ) -> Result<Response<Self::ListActionsStream>, Status> {
         let actions = vec![
+            ActionType {
+                r#type: "get_server_info".into(),
+                description: "Get server configuration and metadata".into(),
+            },
             ActionType {
                 r#type: "flush_cache".into(),
                 description: "Flush the server cache".into(),

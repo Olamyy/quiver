@@ -98,6 +98,19 @@ build-release: .protoc ## Build Rust code (release mode)
 check: .protoc ## Quick syntax check without building
 	cd quiver-core && cargo check --all-features
 
+.PHONY: audit
+audit: ## Run security audit (with accepted risk exclusions)
+	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
+	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071
+
+.PHONY: audit-all
+audit-all: ## Run security audit without exclusions (shows all vulnerabilities)
+	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
+	cd quiver-core && cargo audit
+
+.PHONY: security
+security: audit ## Run security checks (alias for audit)
+
 .PHONY: run
 run: .protoc ## Run Quiver server (debug mode, optional CONFIG=path/to/config.yaml)
 	cd quiver-core && cargo run $(if $(CONFIG),-- --config ../$(CONFIG))
@@ -107,13 +120,15 @@ run-release: .protoc ## Run Quiver server (release mode, optional CONFIG=path/to
 	cd quiver-core && cargo run --release $(if $(CONFIG),-- --config ../$(CONFIG))
 
 .PHONY: quality
-quality: format lint ## Run full quality pipeline (format + lint)
+quality: format lint audit ## Run full quality pipeline (format + lint + security)
 
 .PHONY: ci-check
-ci-check: ## Run complete CI pipeline (format check + lint + test)
+ci-check: ## Run complete CI pipeline (format check + lint + test + security)
 	cd quiver-core && cargo fmt --all -- --check
 	cd quiver-core && cargo clippy --all-features -- -D warnings
 	cd quiver-core && cargo test --all-features
+	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
+	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071
 
 .PHONY: main
 main: quality test ## Main development workflow (quality + test)

@@ -1,0 +1,15 @@
+# Cargo audit configuration for Quiver
+
+[advisories]
+# Ignore the RSA Marvin attack vulnerability (RUSTSEC-2023-0071)
+# Rationale: 
+# - This is a timing side-channel attack against RSA PKCS#1 v1.5 decryption
+# - It affects MySQL SSL connections, which we don't use (we only use PostgreSQL)
+# - The vulnerability comes through sqlx-mysql as a transitive dependency
+# - We use PostgreSQL with TLS, not MySQL with RSA SSL handshakes
+# - Risk assessment: Low impact for our use case (no MySQL usage)
+# - Severity: Medium (5.9 CVSS score)
+# - Tracked in: https://rustsec.org/advisories/RUSTSEC-2023-0071
+ignore = [
+    "RUSTSEC-2023-0071"  # RSA timing attack (affects MySQL only, not our PostgreSQL usage)
+]

@@ -278,9 +278,37 @@ Configuration precedence:
 2. config file
 3. defaults
 
-Example configuration:
+## Configuration Examples
 
+The [`examples/`](examples/) directory contains configuration examples for different deployment scenarios:
+
+- **[`memory-only.yaml`](examples/config/memory.yaml)** - Development and high-performance in-memory caching
+- **[`development.yaml`](examples/config/development.yaml)** - Local development with PostgreSQL + Redis
+- **[`postgres.yaml`](examples/config/postgres.yaml)** - Production with persistent feature storage
+- **[`redis.yaml`](examples/config/redis.yaml)** - Ultra-low latency real-time inference
+- **[`hybrid-multi-adapter.yaml`](examples/config/hybrid-multi-adapter.yaml)** - Complex ML pipelines with mixed adapters
+
+### Quick Start with Examples
+
+Use the interactive configuration selector:
+
+```bash
+./examples/quick-start.sh
 ```
+
+### Docker Development Environment
+
+For local testing with real databases:
+
+```bash
+cd examples/docker
+docker-compose up -d
+QUIVER_CONFIG="examples/config/development.yaml" make run
+```
+
+## Basic Configuration Structure
+
+```yaml
 server:
   host: "127.0.0.1"
   port: 8815
@@ -306,6 +334,8 @@ adapters:
   memory:
     type: memory
 ```
+
+See the [examples directory](examples/) for complete configuration examples and detailed documentation.
 
 ---
 
@@ -437,6 +467,27 @@ Goals:
 * horizontal scaling
 * multi‑tenant support
 * performance benchmarks
+
+---
+
+# Security
+
+Quiver follows security best practices for ML infrastructure:
+
+- **Encrypted Connections**: TLS required for PostgreSQL, Redis, and gRPC in production
+- **Input Validation**: All entity IDs and feature names validated to prevent injection attacks  
+- **Secure Credentials**: Environment variable-based credential management
+- **Regular Audits**: Automated security dependency scanning
+
+For detailed security information, see [SECURITY.md](SECURITY.md).
+
+```bash
+# Run security audit
+make audit
+
+# Run all quality checks (including security)
+make quality
+```
 
 ---
 

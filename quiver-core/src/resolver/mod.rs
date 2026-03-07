@@ -1,3 +1,4 @@
+use crate::adapters::utils::parse_arrow_type_string;
 use crate::adapters::{AdapterError, BackendAdapter};
 use crate::proto::quiver::v1::FeatureViewMetadata;
 use crate::registry::Registry;
@@ -21,6 +22,36 @@ impl Resolver {
 
     pub fn register_adapter(&self, name: String, adapter: Arc<dyn BackendAdapter>) {
         self.adapters.insert(name, adapter);
+    }
+
+    /// Convert arrow_type string to Arrow DataType using the shared utility.
+    ///
+    /// This function wraps the shared parse_arrow_type_string function and handles
+    /// resolver-specific requirements like UTC timezone for timestamps.
+    fn parse_arrow_type(
+        arrow_type: &str,
+        column_name: &str,
+    ) -> Result<arrow::datatypes::DataType, ResolverError> {
+        // Handle timestamp_ns as timestamp for backward compatibility
+        let normalized_type = if arrow_type == "timestamp_ns" {
+            "timestamp"
+        } else {
+            arrow_type
+        };
+
+        let mut data_type = parse_arrow_type_string(normalized_type).map_err(|e| {
+            ResolverError::Internal(format!(
+                "Invalid arrow_type '{}' for column '{}': {}",
+                arrow_type, column_name, e
+            ))
+        })?;
+
+        // Add UTC timezone for timestamps as required by resolver
+        if let arrow::datatypes::DataType::Timestamp(unit, _) = data_type {
+            data_type = arrow::datatypes::DataType::Timestamp(unit, Some("UTC".into()));
+        }
+
+        Ok(data_type)
     }
 
     pub async fn resolve(
@@ -56,9 +87,28 @@ impl Resolver {
             .get(backend_name)
             .ok_or_else(|| ResolverError::BackendNotFound(backend_name.clone()))?;
 
+        let mut expected_types = std::collections::HashMap::new();
+        for feature_name in feature_names {
+            if let Some(column) = metadata
+                .columns
+                .iter()
+                .find(|col| &col.name == feature_name)
+            {
+                let dt = Self::parse_arrow_type(&column.arrow_type, &column.name)?;
+                expected_types.insert(feature_name.clone(), dt);
+            }
+        }
+
         let batch = adapter
             .value()
-            .get(entity_ids, feature_names, as_of, None)
+            .get_with_expected_types(
+                entity_ids,
+                feature_names,
+                &metadata.entity_key,
+                &expected_types,
+                as_of,
+                None,
+            )
             .await
             .map_err(ResolverError::Adapter)?;
 
@@ -84,23 +134,8 @@ impl Resolver {
         let fields = metadata
             .columns
             .iter()
-            .map(|col| {
-                let dt = match col.arrow_type.as_str() {
-                    "float64" => arrow::datatypes::DataType::Float64,
-                    "int64" => arrow::datatypes::DataType::Int64,
-                    "string" => arrow::datatypes::DataType::Utf8,
-                    "bool" => arrow::datatypes::DataType::Boolean,
-                    "timestamp_ns" => arrow::datatypes::DataType::Timestamp(
-                        arrow::datatypes::TimeUnit::Nanosecond,
-                        Some("UTC".into()),
-                    ),
-                    other => {
-                        return Err(ResolverError::Internal(format!(
-                            "Unknown arrow_type '{}' for column '{}'",
-                            other, col.name
-                        )));
-                    }
-                };
+            .map(|col| -> Result<arrow::datatypes::Field, ResolverError> {
+                let dt = Self::parse_arrow_type(&col.arrow_type, &col.name)?;
                 Ok(arrow::datatypes::Field::new(&col.name, dt, col.nullable))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -113,21 +148,6 @@ impl Resolver {
             .list_views()
             .await
             .map_err(|e| ResolverError::Registry(e.to_string()))
-    }
-
-    pub async fn put(&self, backend_name: &str, batch: RecordBatch) -> Result<(), ResolverError> {
-        let adapter = self
-            .adapters
-            .get(backend_name)
-            .ok_or_else(|| ResolverError::BackendNotFound(backend_name.to_string()))?;
-
-        use crate::adapters::PutOptions;
-
-        adapter
-            .value()
-            .put(batch, &PutOptions::default())
-            .await
-            .map_err(ResolverError::Adapter)
     }
 }
 
