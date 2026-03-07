@@ -1,0 +1,36 @@
+# ClickHouse adapter - basic table-per-feature pattern
+#
+# This configuration demonstrates the simplest ClickHouse setup:
+# - One table per feature (features_user_spend, features_conversion_rate, etc.)
+# - Direct queries without temporal support
+# - Default batch size (10,000 entities)
+
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+
+registry:
+  type: static
+  views:
+    - name: user_features
+      entity_type: user
+      entity_key: user_id
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          source: clickhouse_features
+        - name: purchase_count
+          arrow_type: int64
+          source: clickhouse_features
+        - name: country
+          arrow_type: string
+          source: clickhouse_features
+
+adapters:
+  clickhouse_features:
+    type: clickhouse
+    connection_string: "clickhouse://localhost:9000/feature_store"
+    source_path: "features_{feature}"
+    max_connections: 20
+    timeout_seconds: 30

@@ -159,6 +159,48 @@ impl ConfigLogger {
                         tracing::info!("  └─ Timeout: {}s", timeout);
                     }
                 }
+                AdapterConfig::ClickHouse {
+                    connection_string,
+                    source_path,
+                    max_connections,
+                    timeout_seconds,
+                    tls,
+                    parameters,
+                } => {
+                    tracing::info!(
+                        "Adapter '{}': type=clickhouse, connection={}",
+                        name,
+                        Self::mask_credentials(connection_string)
+                    );
+
+                    let tls_status = if tls.is_some() { "enabled" } else { "disabled" };
+                    tracing::info!("  └─ TLS: {}", tls_status);
+
+                    match source_path {
+                        SourcePath::Template(tmpl) => {
+                            tracing::info!("  └─ Source Path: {} (template)", tmpl);
+                        }
+                        SourcePath::Structured { table, column } => {
+                            let col_str = column
+                                .as_ref()
+                                .map(|c| format!(".{}", c))
+                                .unwrap_or_default();
+                            tracing::info!("  └─ Source Path: {}{} (structured)", table, col_str);
+                        }
+                    }
+
+                    if let Some(max_conn) = max_connections {
+                        tracing::info!("  └─ Max Connections: {}", max_conn);
+                    }
+
+                    if let Some(timeout) = timeout_seconds {
+                        tracing::info!("  └─ Timeout: {}s", timeout);
+                    }
+
+                    if let Some(chunk_size) = parameters.get("chunk_size") {
+                        tracing::info!("  └─ Chunk Size: {}", chunk_size);
+                    }
+                }
             }
         }
     }

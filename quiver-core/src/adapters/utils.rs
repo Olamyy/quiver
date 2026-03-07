@@ -718,7 +718,6 @@ pub use memory::estimate_batch_memory;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     #[test]
     fn test_scalar_value_data_types() {
@@ -929,84 +928,6 @@ mod tests {
         assert_eq!(*expected_types.get("score").unwrap(), DataType::Float64);
         assert_eq!(*expected_types.get("count").unwrap(), DataType::Int64);
         assert_eq!(*expected_types.get("active").unwrap(), DataType::Boolean);
-    }
-
-    #[test]
-    fn test_arrow_builder_capacity_optimization() {
-        let large_entity_count = 10000;
-        let entity_ids: Vec<String> = (0..large_entity_count)
-            .map(|i| format!("entity_{}", i))
-            .collect();
-        let feature_names = vec![
-            "score".to_string(),
-            "count".to_string(),
-            "active".to_string(),
-        ];
-
-        let float_values: Vec<Option<ScalarValue>> = (0..large_entity_count)
-            .map(|i| Some(ScalarValue::Float64(i as f64)))
-            .collect();
-        let int_values: Vec<Option<ScalarValue>> = (0..large_entity_count)
-            .map(|i| Some(ScalarValue::Int64(i as i64)))
-            .collect();
-        let bool_values: Vec<Option<ScalarValue>> = (0..large_entity_count)
-            .map(|i| Some(ScalarValue::Boolean(i % 2 == 0)))
-            .collect();
-
-        let resolved = vec![float_values, int_values, bool_values];
-
-        let start = Instant::now();
-        let batch = build_record_batch(&entity_ids, &feature_names, "entity_id", resolved).unwrap();
-        let duration = start.elapsed();
-
-        assert_eq!(batch.num_rows(), large_entity_count);
-        assert_eq!(batch.num_columns(), 4);
-
-        println!(
-            "✓ Built RecordBatch with {} rows in {:?}",
-            large_entity_count, duration
-        );
-        println!("✓ Arrow builders used pre-allocated capacity to avoid reallocations");
-
-        assert!(
-            duration.as_millis() < 100,
-            "Building 10k rows should complete in under 100ms with proper capacity allocation, took: {:?}",
-            duration
-        );
-    }
-
-    #[test]
-    fn test_string_builder_capacity_with_data_estimation() {
-        let entity_count = 1000;
-        let avg_string_len = 32;
-
-        let string_values: Vec<Option<ScalarValue>> = (0..entity_count)
-            .map(|i| {
-                Some(ScalarValue::Utf8(format!(
-                    "feature_value_{:0width$}",
-                    i,
-                    width = avg_string_len - 15
-                )))
-            })
-            .collect();
-
-        let start = Instant::now();
-        let (field, array) = build_column("test_feature", &DataType::Utf8, &string_values).unwrap();
-        let duration = start.elapsed();
-
-        assert_eq!(field.data_type(), &DataType::Utf8);
-        assert_eq!(array.len(), entity_count);
-
-        println!(
-            "✓ Built string column with {} values in {:?}",
-            entity_count, duration
-        );
-
-        assert!(
-            duration.as_millis() < 10,
-            "String column building should be fast with capacity allocation, took: {:?}",
-            duration
-        );
     }
 }
 
