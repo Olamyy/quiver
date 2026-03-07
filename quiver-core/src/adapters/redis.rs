@@ -1,7 +1,7 @@
 use crate::adapters::{
     AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, TemporalCapability,
 };
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
@@ -23,11 +23,14 @@ impl RedisAdapter {
     /// exposure in logs or process lists.
     ///
     /// # Authentication
-    /// Redis authentication is supported via the password parameter, which can be set
-    /// securely using environment variables through the config system:
+    /// Redis authentication is supported via:
+    /// 1. Password parameter (takes precedence if provided)
+    /// 2. Embedded credentials in URL (e.g., redis://:password@host:port)
+    ///
+    /// Password parameter can be set securely using environment variables:
     /// `QUIVER_ADAPTERS__<ADAPTER_NAME>__PASSWORD=your_redis_password`
     ///
-    /// If no password is provided, no authentication is used.
+    /// If no password is provided via either method, no authentication is used.
     ///
     /// # TLS Configuration
     /// TLS support is determined by:
@@ -40,28 +43,15 @@ impl RedisAdapter {
         key_template: &str,
         tls_config: Option<&crate::config::AdapterTlsConfig>,
     ) -> Result<Self, AdapterError> {
-        if url.contains('@') && (url.starts_with("redis://") || url.starts_with("rediss://")) {
-            return Err(AdapterError::invalid(
-                "redis",
-                "Connection URL should not contain embedded credentials. Use password parameter instead.",
-            ));
-        }
-
-        // Determine TLS settings
         let tls_enabled = if let Some(tls_cfg) = tls_config {
-            // Explicit TLS config provided - TLS is enabled
             tls_cfg.is_tls_enabled(url)
         } else {
-            // No TLS config - check URL protocol
             crate::config::is_tls_enabled_by_protocol(url)
         };
 
-        // Convert URL to appropriate protocol based on TLS settings
         let effective_url = if tls_enabled && url.starts_with("redis://") {
-            // Convert redis:// to rediss:// when TLS is explicitly enabled
             url.replacen("redis://", "rediss://", 1)
         } else if !tls_enabled && url.starts_with("rediss://") {
-            // Convert rediss:// to redis:// when TLS is explicitly disabled
             url.replacen("rediss://", "redis://", 1)
         } else {
             url.to_string()
@@ -199,7 +189,11 @@ impl BackendAdapter for RedisAdapter {
         }
     }
 
-    async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError> {
+    async fn describe_schema(
+        &self,
+        feature_names: &[String],
+        entity_key: &str,
+    ) -> Result<Schema, AdapterError> {
         if feature_names.is_empty() {
             return Err(AdapterError::invalid(
                 "redis",
@@ -208,7 +202,7 @@ impl BackendAdapter for RedisAdapter {
         }
 
         let mut conn = self.connection.clone();
-        let mut fields = vec![Field::new("entity_id", DataType::Utf8, false)];
+        let mut fields = vec![Field::new(entity_key, DataType::Utf8, false)];
 
         for feature_name in feature_names {
             let sample_key = self.build_key(feature_name, "*")?;
@@ -220,19 +214,19 @@ impl BackendAdapter for RedisAdapter {
                 })?;
 
                 if let Some(v) = value {
-                    if v.starts_with("f64:") {
-                        DataType::Float64
-                    } else if v.starts_with("i64:") {
-                        DataType::Int64
-                    } else if v.starts_with("str:") {
-                        DataType::Utf8
-                    } else if v.starts_with("bool:") {
+                    if v.to_lowercase().parse::<bool>().is_ok() {
                         DataType::Boolean
-                    } else {
+                    } else if v.parse::<i64>().is_ok() {
+                        DataType::Int64
+                    } else if v.parse::<f64>().is_ok() {
                         DataType::Float64
+                    } else if v.parse::<DateTime<Utc>>().is_ok() {
+                        DataType::Timestamp(TimeUnit::Nanosecond, None)
+                    } else {
+                        DataType::Utf8
                     }
                 } else {
-                    DataType::Float64
+                    DataType::Utf8
                 }
             } else {
                 DataType::Float64
@@ -248,6 +242,7 @@ impl BackendAdapter for RedisAdapter {
         &self,
         entity_ids: &[String],
         feature_names: &[String],
+        entity_key: &str,
         _as_of: Option<DateTime<Utc>>,
         _timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {
@@ -297,25 +292,31 @@ impl BackendAdapter for RedisAdapter {
                 )
             })?;
 
-            let mut parsed_values: Vec<(Option<String>, Option<f64>, Option<i64>, Option<bool>)> =
-                Vec::new();
+            let mut parsed_values: Vec<(
+                Option<String>,
+                Option<f64>,
+                Option<i64>,
+                Option<bool>,
+                Option<DateTime<Utc>>,
+            )> = Vec::new();
             let mut column_type = "null";
 
             for value in &raw_values {
-                let (str_val, float_val, int_val, bool_val) = if let Some(v) = value {
-                    if let Some(stripped) = v.strip_prefix("f64:") {
-                        (None, stripped.parse::<f64>().ok(), None, None)
-                    } else if let Some(stripped) = v.strip_prefix("i64:") {
-                        (None, None, stripped.parse::<i64>().ok(), None)
-                    } else if let Some(stripped) = v.strip_prefix("str:") {
-                        (Some(stripped.to_string()), None, None, None)
-                    } else if let Some(stripped) = v.strip_prefix("bool:") {
-                        (None, None, None, stripped.parse::<bool>().ok())
+                let (str_val, float_val, int_val, bool_val, timestamp_val) = if let Some(v) = value
+                {
+                    if let Ok(bool_val) = v.to_lowercase().parse::<bool>() {
+                        (None, None, None, Some(bool_val), None)
+                    } else if let Ok(int_val) = v.parse::<i64>() {
+                        (None, None, Some(int_val), None, None)
+                    } else if let Ok(float_val) = v.parse::<f64>() {
+                        (None, Some(float_val), None, None, None)
+                    } else if let Ok(timestamp_val) = v.parse::<DateTime<Utc>>() {
+                        (None, None, None, None, Some(timestamp_val))
                     } else {
-                        (None, v.parse::<f64>().ok(), None, None)
+                        (Some(v.to_string()), None, None, None, None)
                     }
                 } else {
-                    (None, None, None, None)
+                    (None, None, None, None, None)
                 };
 
                 if column_type == "null" {
@@ -325,41 +326,52 @@ impl BackendAdapter for RedisAdapter {
                         column_type = "int64";
                     } else if bool_val.is_some() {
                         column_type = "boolean";
+                    } else if timestamp_val.is_some() {
+                        column_type = "timestamp";
                     } else if float_val.is_some() {
                         column_type = "float64";
                     }
                 }
 
-                parsed_values.push((str_val, float_val, int_val, bool_val));
+                parsed_values.push((str_val, float_val, int_val, bool_val, timestamp_val));
             }
 
             match column_type {
                 "string" => {
                     let values: Vec<Option<&str>> = parsed_values
                         .iter()
-                        .map(|(s, _, _, _)| s.as_ref().map(|s| s.as_str()))
+                        .map(|(s, _, _, _, _)| s.as_ref().map(|s| s.as_str()))
                         .collect();
                     columns.push(Arc::new(arrow::array::StringArray::from(values)));
                 }
                 "int64" => {
                     let values: Vec<Option<i64>> =
-                        parsed_values.iter().map(|(_, _, i, _)| *i).collect();
+                        parsed_values.iter().map(|(_, _, i, _, _)| *i).collect();
                     columns.push(Arc::new(arrow::array::Int64Array::from(values)));
                 }
                 "boolean" => {
                     let values: Vec<Option<bool>> =
-                        parsed_values.iter().map(|(_, _, _, b)| *b).collect();
+                        parsed_values.iter().map(|(_, _, _, b, _)| *b).collect();
                     columns.push(Arc::new(arrow::array::BooleanArray::from(values)));
+                }
+                "timestamp" => {
+                    let values: Vec<Option<i64>> = parsed_values
+                        .iter()
+                        .map(|(_, _, _, _, ts)| ts.map(|t| t.timestamp_nanos_opt().unwrap_or(0)))
+                        .collect();
+                    columns.push(Arc::new(arrow::array::TimestampNanosecondArray::from(
+                        values,
+                    )));
                 }
                 _ => {
                     let values: Vec<Option<f64>> =
-                        parsed_values.iter().map(|(_, f, _, _)| *f).collect();
+                        parsed_values.iter().map(|(_, f, _, _, _)| *f).collect();
                     columns.push(Arc::new(arrow::array::Float64Array::from(values)));
                 }
             }
         }
 
-        let mut fields = vec![Field::new("entity_id", DataType::Utf8, false)];
+        let mut fields = vec![Field::new(entity_key, DataType::Utf8, false)];
         for (i, feature) in feature_names.iter().enumerate() {
             let data_type = if let Some(col) = columns.get(i + 1) {
                 match col.data_type() {
@@ -367,6 +379,7 @@ impl BackendAdapter for RedisAdapter {
                     DataType::Int64 => DataType::Int64,
                     DataType::Utf8 => DataType::Utf8,
                     DataType::Boolean => DataType::Boolean,
+                    DataType::Timestamp(_, _) => DataType::Timestamp(TimeUnit::Nanosecond, None),
                     _ => DataType::Float64,
                 }
             } else {

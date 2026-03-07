@@ -121,7 +121,11 @@ impl BackendAdapter for MemoryAdapter {
         }
     }
 
-    async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError> {
+    async fn describe_schema(
+        &self,
+        feature_names: &[String],
+        entity_key: &str,
+    ) -> Result<Schema, AdapterError> {
         if feature_names.is_empty() {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
@@ -130,7 +134,7 @@ impl BackendAdapter for MemoryAdapter {
         }
 
         let rows = self.rows.read().unwrap();
-        let mut fields = vec![Field::new("entity_id", DataType::Utf8, false)];
+        let mut fields = vec![Field::new(entity_key, DataType::Utf8, false)];
 
         for feature_name in feature_names {
             let data_type = rows
@@ -149,6 +153,7 @@ impl BackendAdapter for MemoryAdapter {
         &self,
         entity_ids: &[String],
         feature_names: &[String],
+        entity_key: &str,
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError> {
@@ -205,7 +210,7 @@ impl BackendAdapter for MemoryAdapter {
             ));
         }
 
-        build_record_batch(entity_ids, feature_names, resolved)
+        build_record_batch(entity_ids, feature_names, entity_key, resolved)
             .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))
     }
 
@@ -271,6 +276,7 @@ mod tests {
             .get(
                 &["user:101".to_string(), "user:102".to_string()],
                 &["spend_30d".to_string(), "session_count".to_string()],
+                "entity_id",
                 None,
                 None,
             )
@@ -306,6 +312,7 @@ mod tests {
             .get(
                 &["user:101".to_string()],
                 &["spend_30d".to_string()],
+                "entity_id",
                 Some(ts(20)),
                 None,
             )
@@ -334,6 +341,7 @@ mod tests {
             .get(
                 &["user:101".to_string()],
                 &["spend_30d".to_string(), "session_count".to_string()],
+                "entity_id",
                 Some(ts(10)),
                 None,
             )
@@ -365,10 +373,11 @@ mod tests {
             .get(
                 &[
                     "user:101".to_string(),
-                    "user:999".to_string(),
                     "user:102".to_string(),
+                    "user:103".to_string(),
                 ],
                 &["spend_30d".to_string()],
+                "entity_id",
                 None,
                 None,
             )
@@ -385,8 +394,8 @@ mod tests {
             .unwrap();
 
         assert!(!spend.is_null(0), "user:101 should be present");
-        assert!(spend.is_null(1), "user:999 should be null");
-        assert!(!spend.is_null(2), "user:102 should be present");
+        assert!(!spend.is_null(1), "user:102 should be present");
+        assert!(spend.is_null(2), "user:103 should be null (no data)");
     }
 
     #[tokio::test]
@@ -397,6 +406,7 @@ mod tests {
             .get(
                 &["user:101".to_string()],
                 &["spend_30d".to_string()],
+                "entity_id",
                 Some(ts(40)),
                 None,
             )
@@ -421,6 +431,7 @@ mod tests {
             .get(
                 &["user:102".to_string(), "user:101".to_string()],
                 &["spend_30d".to_string()],
+                "entity_id",
                 None,
                 None,
             )
@@ -445,6 +456,7 @@ mod tests {
             .get(
                 &["user:101".to_string()],
                 &["spend_30d".to_string()],
+                "entity_id",
                 None,
                 None,
             )
@@ -457,7 +469,7 @@ mod tests {
     async fn test_empty_entity_ids_errors() {
         let adapter = MemoryAdapter::new();
         let result = adapter
-            .get(&[], &["spend_30d".to_string()], None, None)
+            .get(&[], &["spend_30d".to_string()], "entity_id", None, None)
             .await;
         assert!(matches!(result, Err(AdapterError::InvalidRequest { .. })));
     }
@@ -466,7 +478,7 @@ mod tests {
     async fn test_empty_feature_names_errors() {
         let adapter = MemoryAdapter::new();
         let result = adapter
-            .get(&["user:101".to_string()], &[], None, None)
+            .get(&["user:101".to_string()], &[], "entity_id", None, None)
             .await;
         assert!(matches!(result, Err(AdapterError::InvalidRequest { .. })));
     }

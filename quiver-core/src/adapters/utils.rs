@@ -17,6 +17,8 @@ use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 
+use super::AdapterError;
+
 /// A unified scalar value type that can hold any supported feature value.
 ///
 /// This enum provides a common representation for feature values across all
@@ -190,12 +192,13 @@ pub fn build_column(
 pub fn build_record_batch(
     entity_ids: &[String],
     feature_names: &[String],
+    entity_key: &str,
     resolved: Vec<Vec<Option<ScalarValue>>>,
 ) -> Result<RecordBatch, arrow::error::ArrowError> {
     let mut fields: Vec<Field> = Vec::with_capacity(feature_names.len() + 1);
     let mut columns: Vec<ArrayRef> = Vec::with_capacity(feature_names.len() + 1);
 
-    fields.push(Field::new("entity_id", DataType::Utf8, false));
+    fields.push(Field::new(entity_key, DataType::Utf8, false));
     let mut id_builder = StringBuilder::new();
     for eid in entity_ids {
         id_builder.append_value(eid);
@@ -428,6 +431,62 @@ pub mod memory {
     }
 }
 
+/// Convert string arrow type to Arrow DataType.
+///
+/// This function maps the string arrow type from the config/proto to the actual
+/// Arrow DataType enum, enabling schema-driven type validation.
+///
+/// # Arguments
+/// * `arrow_type_str` - String representation of the Arrow type (e.g., "float64", "string")
+///
+/// # Returns
+/// * `Ok(DataType)` - Successfully parsed Arrow type
+/// * `Err(String)` - Unsupported or invalid arrow type string
+///
+/// # Supported Types
+/// - "float64" -> DataType::Float64
+/// - "int64" -> DataType::Int64  
+/// - "string" -> DataType::Utf8
+/// - "bool", "boolean" -> DataType::Boolean
+/// - "timestamp" -> DataType::Timestamp(TimeUnit::Nanosecond, None)
+pub fn parse_arrow_type_string(arrow_type_str: &str) -> Result<DataType, String> {
+    match arrow_type_str.to_lowercase().as_str() {
+        "float64" | "double" => Ok(DataType::Float64),
+        "int64" | "long" => Ok(DataType::Int64),
+        "string" | "utf8" => Ok(DataType::Utf8),
+        "bool" | "boolean" => Ok(DataType::Boolean),
+        "timestamp" => Ok(DataType::Timestamp(TimeUnit::Nanosecond, None)),
+        other => Err(format!(
+            "Unsupported arrow type: '{}'. Supported types: float64, int64, string, bool, timestamp",
+            other
+        )),
+    }
+}
+
+/// Extract expected types from FeatureViewMetadata for type validation.
+///
+/// This function converts the proto FeatureViewMetadata into a map of feature names
+/// to Arrow DataTypes that can be used for schema validation.
+///
+/// # Arguments
+/// * `view_metadata` - Feature view metadata from the registry
+///
+/// # Returns
+/// * `Ok(HashMap<String, DataType>)` - Map of feature names to expected types
+/// * `Err(String)` - Error parsing arrow types from metadata
+pub fn extract_expected_types_from_metadata(
+    view_metadata: &crate::proto::quiver::v1::FeatureViewMetadata,
+) -> Result<std::collections::HashMap<String, DataType>, String> {
+    let mut expected_types = std::collections::HashMap::new();
+
+    for column in &view_metadata.columns {
+        let arrow_type = parse_arrow_type_string(&column.arrow_type)?;
+        expected_types.insert(column.name.clone(), arrow_type);
+    }
+
+    Ok(expected_types)
+}
+
 /// Re-export memory estimation for backward compatibility
 pub use memory::estimate_batch_memory;
 
@@ -465,7 +524,7 @@ mod tests {
             Some(ScalarValue::Float64(2.0)),
         ]];
 
-        let batch = build_record_batch(&entity_ids, &feature_names, resolved).unwrap();
+        let batch = build_record_batch(&entity_ids, &feature_names, "entity_id", resolved).unwrap();
 
         assert_eq!(batch.num_rows(), 2);
         assert_eq!(batch.num_columns(), 2);
@@ -479,7 +538,7 @@ mod tests {
         let feature_names = vec!["feature1".to_string()];
         let resolved = vec![vec![Some(ScalarValue::Float64(1.0)), None]];
 
-        let batch = build_record_batch(&entity_ids, &feature_names, resolved).unwrap();
+        let batch = build_record_batch(&entity_ids, &feature_names, "entity_id", resolved).unwrap();
 
         assert_eq!(batch.num_rows(), 2);
 
@@ -502,4 +561,320 @@ mod tests {
         assert_eq!(float_array.value(0), 10.0);
         assert_eq!(float_array.value(1), 20.5);
     }
+
+    #[test]
+    fn test_batch_conversion_strict_mode() {
+        let raw_values = vec![
+            Some("1.5".to_string()),
+            Some("2.7".to_string()),
+            None,
+            Some("3.14".to_string()),
+        ];
+
+        let result =
+            convert_batch_to_scalars(&raw_values, &DataType::Float64, "test", "test_feature");
+
+        assert!(result.is_ok());
+        let scalars = result.unwrap();
+        assert_eq!(scalars.len(), 4);
+
+        if let Some(ScalarValue::Float64(v)) = &scalars[0] {
+            assert_eq!(*v, 1.5);
+        } else {
+            panic!("Expected Float64(1.5)");
+        }
+
+        assert!(scalars[2].is_none());
+    }
+
+    #[test]
+    fn test_batch_conversion_strict_mode_failure() {
+        let raw_values = vec![Some("1.5".to_string()), Some("not_a_number".to_string())];
+
+        let result =
+            convert_batch_to_scalars(&raw_values, &DataType::Float64, "test", "test_feature");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_batch_conversion_permissive_mode() {
+        let raw_values = vec![Some("42.7".to_string()), Some("43".to_string()), None];
+
+        let result =
+            convert_batch_to_scalars(&raw_values, &DataType::Int64, "test", "test_feature");
+
+        assert!(result.is_ok());
+        let scalars = result.unwrap();
+
+        if let Some(ScalarValue::Int64(v)) = &scalars[0] {
+            assert_eq!(*v, 42);
+        } else {
+            panic!("Expected Int64(42)");
+        }
+    }
+
+    #[test]
+    fn test_batch_conversion_empty() {
+        let raw_values: Vec<Option<String>> = vec![];
+
+        let result =
+            convert_batch_to_scalars(&raw_values, &DataType::Float64, "test", "test_feature");
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_arrow_type_string() {
+        assert_eq!(
+            parse_arrow_type_string("float64").unwrap(),
+            DataType::Float64
+        );
+        assert_eq!(
+            parse_arrow_type_string("DOUBLE").unwrap(),
+            DataType::Float64
+        );
+        assert_eq!(parse_arrow_type_string("int64").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_string("LONG").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_string("string").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_string("UTF8").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_string("bool").unwrap(), DataType::Boolean);
+        assert_eq!(
+            parse_arrow_type_string("BOOLEAN").unwrap(),
+            DataType::Boolean
+        );
+        assert_eq!(
+            parse_arrow_type_string("timestamp").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, None)
+        );
+
+        assert!(parse_arrow_type_string("unsupported").is_err());
+
+        // Test empty arrow_type - should fail with clear error
+        let empty_result = parse_arrow_type_string("");
+        assert!(empty_result.is_err());
+        assert!(
+            empty_result
+                .unwrap_err()
+                .contains("Unsupported arrow type: ''")
+        );
+
+        // Test whitespace-only arrow_type - should also fail
+        let whitespace_result = parse_arrow_type_string("  ");
+        assert!(whitespace_result.is_err());
+        assert!(
+            whitespace_result
+                .unwrap_err()
+                .contains("Unsupported arrow type: '  '")
+        );
+    }
+
+    #[test]
+    fn test_extract_expected_types_from_metadata() {
+        use crate::proto::quiver::v1::{FeatureColumnSchema, FeatureViewMetadata};
+
+        let metadata = FeatureViewMetadata {
+            name: "test_view".to_string(),
+            entity_type: "user".to_string(),
+            entity_key: "user_id".to_string(),
+            columns: vec![
+                FeatureColumnSchema {
+                    name: "score".to_string(),
+                    arrow_type: "float64".to_string(),
+                    nullable: true,
+                },
+                FeatureColumnSchema {
+                    name: "count".to_string(),
+                    arrow_type: "int64".to_string(),
+                    nullable: false,
+                },
+                FeatureColumnSchema {
+                    name: "active".to_string(),
+                    arrow_type: "bool".to_string(),
+                    nullable: true,
+                },
+            ],
+            backend_routing: std::collections::HashMap::new(),
+            schema_version: 1,
+        };
+
+        let expected_types = extract_expected_types_from_metadata(&metadata).unwrap();
+
+        assert_eq!(expected_types.len(), 3);
+        assert_eq!(*expected_types.get("score").unwrap(), DataType::Float64);
+        assert_eq!(*expected_types.get("count").unwrap(), DataType::Int64);
+        assert_eq!(*expected_types.get("active").unwrap(), DataType::Boolean);
+    }
+
+    #[test]
+    fn test_extract_expected_types_with_empty_arrow_type() {
+        use crate::proto::quiver::v1::{FeatureColumnSchema, FeatureViewMetadata};
+
+        let metadata_with_empty_arrow_type = FeatureViewMetadata {
+            name: "test_view".to_string(),
+            entity_type: "user".to_string(),
+            entity_key: "user_id".to_string(),
+            columns: vec![FeatureColumnSchema {
+                name: "score".to_string(),
+                arrow_type: "".to_string(), // Empty arrow_type should cause error
+                nullable: true,
+            }],
+            backend_routing: std::collections::HashMap::new(),
+            schema_version: 1,
+        };
+
+        let result = extract_expected_types_from_metadata(&metadata_with_empty_arrow_type);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported arrow type: ''"));
+    }
+}
+
+/// Convert a raw string value to a ScalarValue with optional type validation.
+///
+/// This function provides flexible type conversion that can either:
+/// 1. Validate that the value matches the expected schema type (strict mode)
+/// 2. Convert the value to the expected type with best effort (permissive mode)
+///
+/// # Arguments
+/// * `raw_value` - The raw string value from the backend
+/// * `expected_type` - The Arrow DataType from the schema
+/// * `backend_name` - Name of the backend adapter (for error messages)
+/// * `feature_name` - Name of the feature (for error messages)
+///
+/// # Returns
+/// * `Ok(ScalarValue)` - Successfully converted value
+/// * `Err(AdapterError)` - Type conversion failed
+///
+/// # Examples
+/// ```
+/// use quiver_core::adapters::utils::convert_raw_to_scalar;
+/// use arrow::datatypes::DataType;
+///
+/// // Float to int conversion - converts "42.5" to 42
+/// let result = convert_raw_to_scalar("42.5", &DataType::Int64, "redis", "count");
+/// assert!(result.is_ok()); // Succeeds with truncation
+///
+/// // String to float conversion  
+/// let result = convert_raw_to_scalar("3.14", &DataType::Float64, "redis", "score");
+/// assert!(result.is_ok()); // Succeeds
+///
+/// // Invalid conversion - fails with clear error
+/// let result = convert_raw_to_scalar("not_a_number", &DataType::Float64, "redis", "score");
+/// assert!(result.is_err()); // Fails
+/// ```
+pub fn convert_raw_to_scalar(
+    raw_value: &str,
+    expected_type: &DataType,
+    backend_name: &str,
+    feature_name: &str,
+) -> Result<ScalarValue, AdapterError> {
+    match expected_type {
+        DataType::Float64 => {
+            // Try float first, then integer as fallback
+            if let Ok(f) = raw_value.parse::<f64>() {
+                Ok(ScalarValue::Float64(f))
+            } else if let Ok(i) = raw_value.parse::<i64>() {
+                Ok(ScalarValue::Float64(i as f64))
+            } else {
+                Err(AdapterError::invalid(
+                    backend_name,
+                    format!(
+                        "Feature '{}' cannot convert '{}' to float64",
+                        feature_name, raw_value
+                    ),
+                ))
+            }
+        }
+        DataType::Int64 => {
+            // Try integer first, then float with truncation as fallback
+            if let Ok(i) = raw_value.parse::<i64>() {
+                Ok(ScalarValue::Int64(i))
+            } else if let Ok(f) = raw_value.parse::<f64>() {
+                Ok(ScalarValue::Int64(f as i64))
+            } else {
+                Err(AdapterError::invalid(
+                    backend_name,
+                    format!(
+                        "Feature '{}' cannot convert '{}' to int64",
+                        feature_name, raw_value
+                    ),
+                ))
+            }
+        }
+        DataType::Utf8 => Ok(ScalarValue::Utf8(raw_value.to_string())),
+        DataType::Boolean => raw_value
+            .to_lowercase()
+            .parse::<bool>()
+            .map(ScalarValue::Boolean)
+            .map_err(|_| {
+                AdapterError::invalid(
+                    backend_name,
+                    format!(
+                        "Feature '{}' cannot convert '{}' to boolean",
+                        feature_name, raw_value
+                    ),
+                )
+            }),
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => raw_value
+            .parse::<DateTime<Utc>>()
+            .map(ScalarValue::Timestamp)
+            .map_err(|_| {
+                AdapterError::invalid(
+                    backend_name,
+                    format!(
+                        "Feature '{}' cannot convert '{}' to timestamp",
+                        feature_name, raw_value
+                    ),
+                )
+            }),
+        other => Err(AdapterError::invalid(
+            backend_name,
+            format!(
+                "Feature '{}' has unsupported Arrow type: {:?}. Supported types: float64, int64, string, boolean, timestamp",
+                feature_name, other
+            ),
+        )),
+    }
+}
+
+/// Convert a batch of raw string values to ScalarValues.
+///
+/// This function provides optimized batch processing for type conversion.
+///
+/// # Arguments
+/// * `raw_values` - Vector of optional raw string values from the backend
+/// * `expected_type` - The Arrow DataType from the schema
+/// * `backend_name` - Name of the backend adapter (for error messages)
+/// * `feature_name` - Name of the feature (for error messages)
+///
+/// # Returns
+/// * `Ok(Vec<Option<ScalarValue>>)` - Successfully converted values
+/// * `Err(AdapterError)` - Type conversion failed
+pub fn convert_batch_to_scalars(
+    raw_values: &[Option<String>],
+    expected_type: &DataType,
+    backend_name: &str,
+    feature_name: &str,
+) -> Result<Vec<Option<ScalarValue>>, AdapterError> {
+    if raw_values.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut result = Vec::with_capacity(raw_values.len());
+
+    for raw_value in raw_values {
+        let scalar_value = match raw_value {
+            Some(raw) => Some(convert_raw_to_scalar(
+                raw,
+                expected_type,
+                backend_name,
+                feature_name,
+            )?),
+            None => None,
+        };
+        result.push(scalar_value);
+    }
+
+    Ok(result)
 }

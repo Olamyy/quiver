@@ -73,7 +73,6 @@ adapters:
   redis_cache:
     type: redis
     connection: "redis://:quiver_dev_redis_password@127.0.0.1:6379"
-    # QUIVER__ADAPTERS__REDIS_CACHE__PASSWORD="your_redis_password"
     key_template: "features:user:{entity}:feature:{feature}"
     # TLS configuration (uncomment for production with TLS-enabled Redis)
     # tls:
@@ -84,7 +83,7 @@ adapters:
   
   redis_recommendations:
     type: redis
-    connection: "redis://127.0.0.1:6379"
+    connection: "redis://:quiver_dev_redis_password@127.0.0.1:6379"
     # Custom key template for recommendation data
     key_template: "ml:recommendations:{entity}:{feature}"
     # Example: TLS without certificate verification (for testing)

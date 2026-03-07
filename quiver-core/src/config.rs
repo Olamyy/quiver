@@ -8,6 +8,80 @@ pub struct Config {
     pub adapters: HashMap<String, AdapterConfig>,
 }
 
+/// Filtered config safe for client exposure (no credentials)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FilteredConfig {
+    pub server: FilteredServerConfig,
+    pub registry: RegistryConfig,
+    pub adapters: HashMap<String, FilteredAdapterConfig>,
+}
+
+/// Server config with TLS details removed
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FilteredServerConfig {
+    pub host: String,
+    pub port: u16,
+    pub max_concurrent_rpcs: Option<u32>,
+    pub max_message_size_mb: Option<usize>,
+    pub compression: Option<Compression>,
+    pub timeout_seconds: Option<u64>,
+}
+
+/// Adapter config with connection details removed
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum FilteredAdapterConfig {
+    Memory,
+    Redis {
+        key_template: String,
+    },
+    Postgres {
+        table_template: String,
+        max_connections: Option<u32>,
+        timeout_seconds: Option<u64>,
+    },
+}
+
+impl Config {
+    /// Create a filtered version of the config safe for client exposure
+    pub fn to_filtered(&self) -> FilteredConfig {
+        FilteredConfig {
+            server: FilteredServerConfig {
+                host: self.server.host.clone(),
+                port: self.server.port,
+                max_concurrent_rpcs: self.server.max_concurrent_rpcs,
+                max_message_size_mb: self.server.max_message_size_mb,
+                compression: self.server.compression.clone(),
+                timeout_seconds: self.server.timeout_seconds,
+            },
+            registry: self.registry.clone(),
+            adapters: self
+                .adapters
+                .iter()
+                .map(|(name, adapter)| {
+                    let filtered = match adapter {
+                        AdapterConfig::Memory => FilteredAdapterConfig::Memory,
+                        AdapterConfig::Redis { key_template, .. } => FilteredAdapterConfig::Redis {
+                            key_template: key_template.clone(),
+                        },
+                        AdapterConfig::Postgres {
+                            table_template,
+                            max_connections,
+                            timeout_seconds,
+                            ..
+                        } => FilteredAdapterConfig::Postgres {
+                            table_template: table_template.clone(),
+                            max_connections: *max_connections,
+                            timeout_seconds: *timeout_seconds,
+                        },
+                    };
+                    (name.clone(), filtered)
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TlsConfig {
     pub cert_path: String,
@@ -110,15 +184,13 @@ impl AdapterTlsConfig {
     /// 1. If TLS config exists, TLS is enabled
     /// 2. If no TLS config, check protocol (rediss://, postgresql with sslmode, etc.)
     pub fn is_tls_enabled(&self, _connection_string: &str) -> bool {
-        // If we have a TLS config section, TLS is enabled
-        true // The presence of this struct means TLS should be enabled
+        true
     }
 
     /// Get the effective certificate verification setting, considering query parameters.
     ///
     /// Query parameters like ?tls_verify=false can override the config setting.
     pub fn should_verify_certificates(&self, connection_string: &str) -> bool {
-        // Check for query parameter override
         if let Ok(url) = url::Url::parse(connection_string) {
             for (key, value) in url.query_pairs() {
                 if key == "tls_verify" {
@@ -127,7 +199,6 @@ impl AdapterTlsConfig {
             }
         }
 
-        // Fall back to config setting
         self.verify_certificates
     }
 }
@@ -183,7 +254,6 @@ impl Config {
             }
             builder = builder.add_source(config::File::from(path_buf).required(true));
         } else {
-            // Default search path: look for config.yaml, config.json etc. in the current directory
             builder = builder.add_source(config::File::with_name("config").required(false));
         }
 

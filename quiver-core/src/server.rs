@@ -10,7 +10,7 @@ use std::time::Instant;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, info};
 
-use crate::config::AccessLogConfig;
+use crate::config::{AccessLogConfig, FilteredConfig};
 use crate::proto::quiver::v1::FeatureRequest;
 use crate::resolver::Resolver;
 use arrow_flight::encode::FlightDataEncoderBuilder;
@@ -32,13 +32,19 @@ struct AccessLogData<'a> {
 pub struct QuiverFlightServer {
     resolver: Arc<Resolver>,
     access_log_config: Option<AccessLogConfig>,
+    filtered_config: FilteredConfig,
 }
 
 impl QuiverFlightServer {
-    pub fn new(resolver: Arc<Resolver>, access_log_config: Option<AccessLogConfig>) -> Self {
+    pub fn new(
+        resolver: Arc<Resolver>,
+        access_log_config: Option<AccessLogConfig>,
+        filtered_config: FilteredConfig,
+    ) -> Self {
         Self {
             resolver,
             access_log_config,
+            filtered_config,
         }
     }
 
@@ -441,6 +447,25 @@ impl FlightService for QuiverFlightServer {
         info!("Received action: {}", action.r#type);
 
         match action.r#type.as_str() {
+            "get_server_info" => {
+                info!("Server info requested");
+
+                let server_info = match serde_json::to_string(&self.filtered_config) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        return Err(Status::internal(format!(
+                            "Failed to serialize server info: {}",
+                            e
+                        )));
+                    }
+                };
+
+                let res = arrow_flight::Result {
+                    body: server_info.into(),
+                };
+                let stream = futures::stream::once(async move { Ok(res) });
+                Ok(Response::new(Box::pin(stream)))
+            }
             "flush_cache" => {
                 info!("Cache flush requested (noop)");
                 let res = arrow_flight::Result {
@@ -471,6 +496,10 @@ impl FlightService for QuiverFlightServer {
         _request: Request<Empty>,
     ) -> Result<Response<Self::ListActionsStream>, Status> {
         let actions = vec![
+            ActionType {
+                r#type: "get_server_info".into(),
+                description: "Get server configuration and metadata".into(),
+            },
             ActionType {
                 r#type: "flush_cache".into(),
                 description: "Flush the server cache".into(),

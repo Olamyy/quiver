@@ -1,0 +1,16 @@
+[project]
+name = "quiver-test-example"
+version = "0.1.0"
+description = "Simple test example for Quiver server using Python client"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "quiver-python",
+    "pyarrow",
+    "psycopg2-binary",
+    "redis",
+    "pandas>=2.3.3",
+]
+
+[tool.uv.sources]
+quiver-python = { path = "../../quiver-python", editable = true }

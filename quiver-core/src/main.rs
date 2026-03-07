@@ -37,25 +37,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("Loading configuration from: {}", path);
     } else {
         tracing::info!("Loading configuration from default search paths");
-    }
+    };
 
     let cfg = config::Config::load(config_path.as_deref())?;
-    run_with_config(cfg).await
-}
 
-async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::Error>> {
-    if cfg.adapters.is_empty() {
-        return Err("Configuration error: No adapters defined".into());
-    }
+    let filtered_config = cfg.to_filtered();
 
-    let (view_count, adapter_count) = (
+    tracing::info!(
+        "
+   ____        _                
+  / __ \\__  __(_)   _____  _____
+ / / / / / / / / | | / _ \\/ ___/
+/ /_/ / /_/ / /| |_| /  __/ /    
+\\___\\_\\__,_/_/ |____/\\___/_/     
+                                 
+Quiver Flight Server starting up on {}:{}
+Loaded {} feature views and {} adapters",
+        cfg.server.host,
+        cfg.server.port,
         match &cfg.registry {
-            config::RegistryConfig::Static { views } => {
-                if views.is_empty() {
-                    return Err("Configuration error: Registry contains no feature views".into());
-                }
-                views.len()
-            }
+            config::RegistryConfig::Static { views } => views.len(),
         },
         cfg.adapters.len(),
     );
@@ -138,7 +139,7 @@ async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::
         }
     }
 
-    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone());
+    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone(), filtered_config);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
@@ -151,22 +152,6 @@ async fn run_with_config(cfg: config::Config) -> Result<(), Box<dyn std::error::
         ))
         .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET)
         .build_v1()?;
-
-    tracing::info!(
-        r#"
-   ____        _                
-  / __ \__  __(_)   _____  _____
- / / / / / / / / | | / _ \/ ___/
-/ /_/ / /_/ / /| |_| /  __/ /    
-\___\_\__,_/_/ |____/\___/_/     
-                                 
-Quiver Flight Server starting up on {}
-Loaded {} feature views and {} adapters
-"#,
-        addr,
-        view_count,
-        adapter_count
-    );
 
     let mut server_builder = Server::builder();
 

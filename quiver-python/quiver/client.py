@@ -1,6 +1,6 @@
 import time
 from datetime import datetime
-from typing import List, Optional, Any, Tuple
+from typing import List, Optional, Any, Tuple, Dict
 from concurrent.futures import ThreadPoolExecutor
 import logging
 
@@ -243,7 +243,7 @@ class Client:
                     table = pa.Table.from_arrays([], schema or pa.schema([]))  # noqa
 
                 logger.debug(
-                    f"Retrieved {table.num_rows} rows in {time.time() - start_time:.2f}s"
+                    f"Retrieved {len(table)} rows in {time.time() - start_time:.2f}s"
                 )
                 return FeatureTable(table)
 
@@ -325,6 +325,152 @@ class Client:
             raise QuiverServerError(f"Failed to list feature views: {str(e)}")
 
         return views
+
+    def get_schema(self, feature_view: FeatureViewName) -> Optional[pa.Schema]:
+        """Get schema for a feature view."""
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        try:
+            descriptor = flight.FlightDescriptor.for_path(feature_view)
+            schema_result = self._flight_client.get_schema(descriptor)
+            return schema_result.schema
+        except flight.FlightUnavailableError:
+            raise QuiverFeatureViewNotFound(feature_view)
+        except Exception as e:
+            raise QuiverServerError(f"Failed to get schema: {str(e)}")
+
+    def get_server_info(self) -> Dict[str, Any]:
+        """Get server configuration and metadata.
+
+        Returns:
+            Dictionary containing server configuration including:
+            - server: Server settings (host, port, etc.)
+            - registry: Feature view definitions
+            - adapters: Adapter configurations (credentials filtered)
+
+        Raises:
+            QuiverValidationError: If client is closed
+            QuiverServerError: If server error occurs
+        """
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        try:
+            import json
+
+            action = flight.Action("get_server_info", b"")
+
+            action_stream = self._flight_client.do_action(action)
+
+            for result in action_stream:
+                server_info = json.loads(result.body.to_pybytes().decode("utf-8"))
+                return server_info
+
+            return {}
+
+        except Exception as e:
+            raise QuiverServerError(f"Failed to get server info: {str(e)}")
+
+    def flush_cache(self) -> bool:
+        """Flush the server cache.
+
+        This operation clears any cached feature data on the server,
+        forcing fresh data retrieval on subsequent requests.
+
+        Returns:
+            bool: True if cache was successfully flushed
+
+        Raises:
+            QuiverValidationError: If client is closed
+            QuiverServerError: If server error occurs
+
+        Note:
+            This is currently a no-op operation on the server side.
+            Future implementations may add actual cache clearing functionality.
+        """
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        try:
+            action = flight.Action("flush_cache", b"")
+
+            action_stream = self._flight_client.do_action(action)
+
+            for result in action_stream:
+                response = result.body.to_pybytes().decode("utf-8")
+                logger.info(f"Cache flush response: {response}")
+                return True
+
+            return False
+
+        except Exception as e:
+            raise QuiverServerError(f"Failed to flush cache: {str(e)}")
+
+    def reload_registry(self) -> bool:
+        """Reload the feature registry.
+
+        This operation forces the server to reload its feature view
+        definitions from the configuration, allowing for dynamic
+        configuration updates without server restart.
+
+        Returns:
+            bool: True if registry was successfully reloaded
+
+        Raises:
+            QuiverValidationError: If client is closed
+            QuiverServerError: If server error occurs
+
+        Note:
+            This is currently a no-op operation on the server side.
+            Future implementations may add actual registry reloading functionality.
+        """
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        try:
+            action = flight.Action("reload_registry", b"")
+
+            action_stream = self._flight_client.do_action(action)
+
+            for result in action_stream:
+                response = result.body.to_pybytes().decode("utf-8")
+                logger.info(f"Registry reload response: {response}")
+                return True
+
+            return False
+
+        except Exception as e:
+            raise QuiverServerError(f"Failed to reload registry: {str(e)}")
+
+    def list_server_actions(self) -> List[Dict[str, str]]:
+        """List all available server management actions.
+
+        Returns:
+            List of action dictionaries containing:
+            - type: Action type identifier
+            - description: Human-readable description of the action
+
+        Raises:
+            QuiverValidationError: If client is closed
+            QuiverServerError: If server error occurs
+        """
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        try:
+            actions = list(self._flight_client.list_actions())
+
+            action_list = []
+            for action in actions:
+                action_list.append(
+                    {"type": action.type, "description": action.description}
+                )
+
+            return action_list
+
+        except Exception as e:
+            raise QuiverServerError(f"Failed to list server actions: {str(e)}")
 
     def close(self) -> None:
         """Close connection to server."""

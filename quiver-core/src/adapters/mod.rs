@@ -45,7 +45,11 @@ pub trait BackendAdapter: Send + Sync {
     ///
     /// If you choose lenient behavior, it must be *stable across time* and *consistent across adapters*,
     /// otherwise the "schema consistency" principle is violated.
-    async fn describe_schema(&self, feature_names: &[String]) -> Result<Schema, AdapterError>;
+    async fn describe_schema(
+        &self,
+        feature_names: &[String],
+        entity_key: &str,
+    ) -> Result<Schema, AdapterError>;
 
     /// Fetch features for entities with optional timeout.
     ///
@@ -57,6 +61,7 @@ pub trait BackendAdapter: Send + Sync {
     /// # Arguments
     /// - `entity_ids` - Entity identifiers to fetch features for
     /// - `feature_names` - Feature names to retrieve
+    /// - `entity_key` - The column name used as entity identifier (e.g. "user_id", "entity_id")
     /// - `as_of` - Point-in-time for temporal queries (`None` = current time)
     /// - `timeout` - Maximum time to wait for response (`None` = adapter default)
     ///
@@ -72,9 +77,42 @@ pub trait BackendAdapter: Send + Sync {
         &self,
         entity_ids: &[String],
         feature_names: &[String],
+        entity_key: &str,
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
     ) -> Result<RecordBatch, AdapterError>;
+
+    /// Fetch features for entities with explicit expected types.
+    ///
+    /// This method allows the caller to specify the expected Arrow types for each feature,
+    /// enabling type validation and conversion based on the feature registry configuration.
+    ///
+    /// # Arguments
+    /// - `entity_ids` - Entity identifiers to fetch features for
+    /// - `feature_names` - Feature names to retrieve  
+    /// - `entity_key` - The column name used as entity identifier
+    /// - `expected_types` - Map of feature names to expected Arrow DataTypes
+    /// - `as_of` - Point-in-time for temporal queries (`None` = current time)
+    /// - `timeout` - Maximum time to wait for response (`None` = adapter default)
+    ///
+    /// # Returns
+    /// RecordBatch with features converted to the expected types
+    ///
+    /// # Default Implementation
+    /// The default implementation calls `get()` and assumes the schema matches expected types.
+    /// Adapters can override this for more sophisticated type handling.
+    async fn get_with_expected_types(
+        &self,
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        _expected_types: &std::collections::HashMap<String, arrow::datatypes::DataType>,
+        as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
+    ) -> Result<RecordBatch, AdapterError> {
+        self.get(entity_ids, feature_names, entity_key, as_of, timeout)
+            .await
+    }
 
     /// Check backend health and return operational metrics.
     ///

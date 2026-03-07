@@ -6,18 +6,40 @@ use prost::Message;
 use quiver_core::adapters::BackendAdapter;
 use quiver_core::adapters::memory::MemoryAdapter;
 use quiver_core::adapters::utils::ScalarValue;
+use quiver_core::config::{
+    FilteredAdapterConfig, FilteredConfig, FilteredServerConfig, RegistryConfig,
+};
 use quiver_core::proto::quiver::v1::{EntityKey, FeatureRequest};
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
 use quiver_core::server::QuiverFlightServer;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::transport::Server;
+
+fn create_test_filtered_config() -> FilteredConfig {
+    FilteredConfig {
+        server: FilteredServerConfig {
+            host: "localhost".to_string(),
+            port: 8815,
+            max_concurrent_rpcs: None,
+            max_message_size_mb: None,
+            compression: None,
+            timeout_seconds: None,
+        },
+        registry: RegistryConfig::Static { views: vec![] },
+        adapters: {
+            let mut adapters = HashMap::new();
+            adapters.insert("memory".to_string(), FilteredAdapterConfig::Memory);
+            adapters
+        },
+    }
+}
 
 #[tokio::test]
 async fn test_feature_serving_retrieval() {
     let registry = Arc::new(StaticRegistry::new());
 
-    // Create memory adapter with pre-seeded test data
     let memory_adapter = MemoryAdapter::seed([
         (
             "u1",
@@ -37,7 +59,7 @@ async fn test_feature_serving_retrieval() {
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
-    let service = QuiverFlightServer::new(resolver.clone(), None);
+    let service = QuiverFlightServer::new(resolver.clone(), None, create_test_filtered_config());
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(addr).unwrap();
@@ -64,7 +86,6 @@ async fn test_feature_serving_retrieval() {
         .unwrap();
     let mut client = FlightServiceClient::new(channel);
 
-    // Register the feature view for serving
     let mut backend_routing = std::collections::HashMap::new();
     backend_routing.insert("val".to_string(), "memory".to_string());
 
@@ -150,7 +171,7 @@ async fn test_get_flight_info() {
         schema_version: 1,
     });
 
-    let service = QuiverFlightServer::new(resolver.clone(), None);
+    let service = QuiverFlightServer::new(resolver.clone(), None, create_test_filtered_config());
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(addr).unwrap();
