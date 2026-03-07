@@ -134,9 +134,10 @@ impl ClickHouseAdapter {
             let query_part = &connection_string[q_pos + 1..];
             for param in query_part.split('&') {
                 if let Some(db_name) = param.strip_prefix("database=")
-                    && !db_name.is_empty() {
-                        return Ok(db_name.to_string());
-                    }
+                    && !db_name.is_empty()
+                {
+                    return Ok(db_name.to_string());
+                }
             }
         }
 
@@ -501,7 +502,10 @@ impl BackendAdapter for ClickHouseAdapter {
                 let row_values = [val1, val2, val3, val4];
 
                 for (feature_idx, _feature_name) in feature_names.iter().enumerate() {
-                    let raw_value = row_values.get(feature_idx).map(|s| s.as_str()).unwrap_or("");
+                    let raw_value = row_values
+                        .get(feature_idx)
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
                     let expected_type = &feature_types[feature_idx];
 
                     let converted_value = if raw_value.is_empty() || raw_value == "NULL" {

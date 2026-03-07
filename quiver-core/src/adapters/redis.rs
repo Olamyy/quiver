@@ -352,7 +352,6 @@ impl BackendAdapter for RedisAdapter {
             let chunk_futures: Vec<_> = entity_key_chunks
                 .into_iter()
                 .zip(entity_mapping_chunks)
-                
                 .map(|(keys_chunk, mappings_chunk)| {
                     let mut conn = self.connection.clone();
                     let keys_vec = keys_chunk.to_vec();
