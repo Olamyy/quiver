@@ -18,10 +18,11 @@ registry:
           source: postgres_historical
         - name: last_purchase_date
           arrow_type: timestamp
-          source: postgres_historical
+          source: s3_data_lake
         - name: is_premium
           arrow_type: bool
           source: clickhouse_historical
+          source_path: "ecommerce_data"
 
     - name: session_features
       entity_type: session
@@ -44,12 +45,15 @@ registry:
         - name: temperature
           arrow_type: float64
           source: clickhouse_historical
+          source_path: "timeseries_data"
         - name: humidity
           arrow_type: float64
           source: clickhouse_historical
+          source_path: "timeseries_data"
         - name: alert_triggered
           arrow_type: bool
           source: clickhouse_historical
+          source_path: "timeseries_data"
 
 adapters:
   postgres_historical:
@@ -68,7 +72,18 @@ adapters:
 
   clickhouse_historical:
     type: clickhouse
-    connection_string: "clickhouse://default@localhost:9000/quiver_test"
+    connection_string: "http://localhost:8123?database=quiver_test"
     source_path: "{feature}"
     max_connections: 10
     timeout_seconds: 30
+
+  s3_data_lake:
+    type: s3parquet
+    storage_uri: "s3://${AWS_BUCKET}/features"
+    source_path: "{feature}.parquet"
+    timeout_seconds: 30
+    auth:
+      region: "${AWS_REGION}"
+      access_key_id: "${AWS_ACCESS_KEY_ID}"
+      secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+
