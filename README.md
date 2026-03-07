@@ -4,11 +4,9 @@
 
 It sits between model servers and feature backends, resolving feature requests, executing parallel retrieval across data sources, and returning columnar feature data via Arrow Flight.
 
-Quiver focuses on a part of the ML stack that is often overlooked: **the serving path from computed features to model inputs**.
-
 ---
 
-# Overview
+# Overview and Motivation
 
 ML systems typically invest heavily in feature computation and model training, but the real‑time path for feature delivery to models often evolves organically inside application code. 
 For example, a typical ML inference pipeline ends up performing several expensive transformations:
@@ -20,12 +18,6 @@ For example, a typical ML inference pipeline ends up performing several expensiv
 5. Convert arrays into tensors
 
 This results in unnecessary latency, duplicated logic across services, and limited observability into what features models actually consume.
-
-Quiver extracts this responsibility into a dedicated infrastructure layer.
-
----
-
-# Motivation
 
 In many production inference systems the serving path resembles the following pipeline.
 
