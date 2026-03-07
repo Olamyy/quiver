@@ -36,7 +36,7 @@ registry:
   views:
     - name: ecommerce_features
       entity_type: user
-      entity_key: user_id
+      entity_key: entity
       source_path: "ecommerce_data"
       columns:
         - name: spend_30d

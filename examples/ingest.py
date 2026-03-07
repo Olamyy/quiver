@@ -62,11 +62,13 @@ def generate_data(scenario, fixtures, count, seed=42):
         for i in range(count):
             session_id = f"session:s{1000 + i:04d}"
             user_id = f"user:{random.randint(1, 1000)}"
+            timestamp = datetime.utcnow() - timedelta(minutes=random.randint(0, 60))
             record = {
                 "entity": session_id,
+                "timestamp": timestamp.isoformat() + "Z",
                 "active_user_id": user_id,
                 "request_count": random.randint(1, 500),
-                "last_activity": (datetime.utcnow() - timedelta(minutes=random.randint(0, 60))).isoformat() + "Z"
+                "last_activity": timestamp.isoformat() + "Z"
             }
             generated.append(record)
 

@@ -42,21 +42,30 @@ E-commerce user features served from PostgreSQL.
 **Use for:** Development and testing with a simple schema.
 
 **Features:**
-- Single table: `ecommerce_data`
+- Single table: `ecommerce_data` (populated by `--scenario ecommerce`)
+- Entity IDs: `user:101`, `user:102`, `user:103` (from seed data)
 - Basic validation (entity IDs and feature names required)
 - No TLS
 - No access logging
 
 **Setup:**
 ```bash
-uv run ingest.py --engine postgres --seed --generate 100
+# Ingest ecommerce data (seed + 100 generated records)
+uv run ingest.py --engine postgres --scenario ecommerce --seed --generate 100
+
+# Start server
 make run CONFIG=examples/config/postgres/basic.yaml
+
+# Query from another terminal
+uv run read.py
 ```
 
 ### `postgres/temporal.yaml`
-Identical to basic.yaml (same schema). Provided for consistency with other adapters.
+Identical to basic.yaml (same schema and table).
 
-**Use when:** You want to add temporal queries to PostgreSQL later.
+**Use when:** You want to test temporal/"as of" queries. The server configuration is the same; only the client would specify `as_of` timestamps.
+
+**Setup:** Same as basic.yaml
 
 ### `postgres/advanced.yaml`
 Production-ready configuration with security and observability.
@@ -64,19 +73,22 @@ Production-ready configuration with security and observability.
 **Features:**
 - Comprehensive validation (batch size, SQL injection safety, timeout bounds)
 - Access logging in JSON format
-- TLS for secure connections
-- Higher connection pool (20 connections)
+- TLS for secure connections (requires cert files)
+- Higher concurrency (100 concurrent RPCs)
 - Compression (gzip)
 - Multiple validations enabled (request + response)
 
 **Setup:**
 ```bash
-# Generate test data
-uv run ingest.py --engine postgres --seed --generate 1000
+# Ingest ecommerce data (for load testing, use 5000+ records)
+uv run ingest.py --engine postgres --scenario ecommerce --seed --generate 5000
 
-# Ensure TLS certificates are in place
-export CH_PASSWORD=your_password
+# Note: TLS requires cert files at /etc/quiver/tls/server.crt and .key
+# For development, comment out the tls section or generate self-signed certs
 make run CONFIG=examples/config/postgres/advanced.yaml
+
+# Query from another terminal
+uv run read.py
 ```
 
 **Configuration highlights:**
@@ -109,15 +121,22 @@ Real-time session state served from Redis.
 **Use for:** Development and testing with session data.
 
 **Features:**
-- Key template: `sessions:{session_id}`
+- Key template: `sessions:{session_id}` (populated by `--scenario sessions`)
+- Entity IDs: `session:s001`, `session:s002`, `session:s003` (from seed data)
 - Current state only (Redis hash storage)
 - Basic validation
 - No TLS or access logging
 
 **Setup:**
 ```bash
-uv run ingest.py --engine redis --seed --generate 100
+# Ingest session data (seed + 100 generated records)
+uv run ingest.py --engine redis --scenario sessions --seed --generate 100
+
+# Start server
 make run CONFIG=examples/config/redis/basic.yaml
+
+# Query from another terminal
+uv run read.py
 ```
 
 **Note:** Redis adapter uses hash-based storage. Each entity ID becomes a Redis hash key with feature names as fields.
@@ -131,12 +150,18 @@ Production-ready configuration with validation, logging, and tuning.
 - TLS support
 - Higher concurrency (200 concurrent RPCs)
 - Configurable chunk size (5000 entities per batch)
+- Entity IDs: `session:s001`, `session:s002`, etc.
 
 **Setup:**
 ```bash
-uv run ingest.py --engine redis --seed --generate 10000
-export REDIS_PASSWORD=your_password
+# Ingest session data (for load testing, use 10000+ records)
+uv run ingest.py --engine redis --scenario sessions --seed --generate 10000
+
+# Start server
 make run CONFIG=examples/config/redis/advanced.yaml
+
+# Query from another terminal
+uv run read.py
 ```
 
 **Configuration highlights:**

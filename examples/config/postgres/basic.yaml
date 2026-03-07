@@ -8,7 +8,7 @@ registry:
   views:
     - name: ecommerce_features
       entity_type: user
-      entity_key: user_id
+      entity_key: entity
       columns:
         - name: spend_30d
           arrow_type: float64
