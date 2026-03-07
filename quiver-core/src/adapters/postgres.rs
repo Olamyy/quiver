@@ -525,7 +525,7 @@ impl PostgresAdapter {
                     .get(feature_name)
                     .cloned()
                     .unwrap_or(DataType::Utf8);
-                
+
                 let query = format!(
                     r#"
                     WITH ranked_features AS (
@@ -547,7 +547,7 @@ impl PostgresAdapter {
                     col = feature_name,
                     table = table_name,
                 );
-                
+
                 Ok((feature_index, query, expected_type, feature_name.to_string()))
             })
             .collect();
