@@ -1,0 +1,15 @@
+# Suppress RSA vulnerability that's not exploitable in our use case
+# (we only use PostgreSQL, not MySQL where RSA would be used)
+# The vulnerability is only present because sqlx 0.8.x unconditionally
+# includes sqlx-mysql as a transitive dependency.
+#
+# RUSTSEC-2023-0071: Marvin Attack (timing side-channel in RSA)
+# - Severity: 5.9 (medium)
+# - Impact: Only affects MySQL usage via sqlx-mysql
+# - Status: No fix available for rsa 0.9.x yet
+# - Mitigation: Will upgrade when rsa publishes a fixed version
+#
+# See: https://rustsec.org/advisories/RUSTSEC-2023-0071
+
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]

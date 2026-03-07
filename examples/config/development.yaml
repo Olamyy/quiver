@@ -59,7 +59,7 @@ adapters:
     type: postgres
     # Local PostgreSQL without TLS requirement
     connection_string: "postgresql://dev_user:dev_password@localhost:5432/quiver_dev?sslmode=prefer"
-    table_template: "dev_features_{feature}"
+    source_path: "dev_features_{feature}"
     max_connections: 5
     timeout_seconds: 10
   
@@ -67,5 +67,5 @@ adapters:
     type: redis
     # Local Redis without TLS
     connection: "redis://localhost:6379"
-    key_template: "dev:{entity}:{feature}"
+    source_path: "dev:{entity}:{feature}"
     # No password for local development

@@ -118,25 +118,29 @@ adapters:
   redis_realtime:
     type: redis
     connection: "rediss://realtime.cache.internal:6380"
-    key_template: "rt:user:{entity}:{feature}"
+    source_path: "rt:user:{entity}:{feature}"
+    parameters:
+      mget_chunk_size: 500
     # Password via environment: QUIVER__ADAPTERS__REDIS_REALTIME__PASSWORD
-  
+
   redis_items:
     type: redis
     connection: "rediss://items.cache.internal:6380"
-    key_template: "items:{entity}:{feature}"
+    source_path: "items:{entity}:{feature}"
+    parameters:
+      mget_chunk_size: 2000
   
   # PostgreSQL for analytical and historical features
   postgres_warehouse:
     type: postgres
     connection_string: "postgresql://ml_reader@warehouse.internal:5432/ml_features?sslmode=require&application_name=quiver"
-    table_template: "user_features_{feature}"
+    source_path: "user_features_{feature}"
     max_connections: 25
     timeout_seconds: 60
   
   postgres_catalog:
     type: postgres  
     connection_string: "postgresql://catalog_reader@catalog.internal:5432/product_db?sslmode=require"
-    table_template: "product_{feature}_view"
+    source_path: "product_{feature}_view"
     max_connections: 15
     timeout_seconds: 30

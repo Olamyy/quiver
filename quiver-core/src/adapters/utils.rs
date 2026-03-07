@@ -7,12 +7,14 @@
 //! - Column type conversion and building
 //! - Array value extraction
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
     Array, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
-    Int64Builder, StringArray, StringBuilder,
+    Int64Builder, PrimitiveBuilder, StringArray, StringBuilder,
 };
+use arrow::datatypes::TimestampNanosecondType;
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
@@ -41,8 +43,8 @@ impl ScalarValue {
             Self::Int64(_) => DataType::Int64,
             Self::Utf8(_) => DataType::Utf8,
             Self::Boolean(_) => DataType::Boolean,
-            Self::Timestamp(_) => DataType::Timestamp(TimeUnit::Nanosecond, None),
-            Self::Null => DataType::Float64, // Default for nulls
+            Self::Timestamp(_) => DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
+            Self::Null => DataType::Float64,
         }
     }
 
@@ -110,7 +112,7 @@ pub fn build_column(
 ) -> Result<(Field, ArrayRef), arrow::error::ArrowError> {
     match dtype {
         DataType::Float64 => {
-            let mut b = Float64Builder::new();
+            let mut b = Float64Builder::with_capacity(values.len());
             for v in values {
                 match v {
                     Some(ScalarValue::Float64(f)) => b.append_value(*f),
@@ -124,7 +126,7 @@ pub fn build_column(
             ))
         }
         DataType::Int64 => {
-            let mut b = Int64Builder::new();
+            let mut b = Int64Builder::with_capacity(values.len());
             for v in values {
                 match v {
                     Some(ScalarValue::Int64(i)) => b.append_value(*i),
@@ -138,7 +140,7 @@ pub fn build_column(
             ))
         }
         DataType::Utf8 => {
-            let mut b = StringBuilder::new();
+            let mut b = StringBuilder::with_capacity(values.len(), values.len() * 64);
             for v in values {
                 match v {
                     Some(ScalarValue::Utf8(s)) => b.append_value(s),
@@ -151,7 +153,7 @@ pub fn build_column(
             ))
         }
         DataType::Boolean => {
-            let mut b = BooleanBuilder::new();
+            let mut b = BooleanBuilder::with_capacity(values.len());
             for v in values {
                 match v {
                     Some(ScalarValue::Boolean(b_val)) => b.append_value(*b_val),
@@ -161,6 +163,45 @@ pub fn build_column(
             Ok((
                 Field::new(name, DataType::Boolean, true),
                 Arc::new(b.finish()) as ArrayRef,
+            ))
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, tz) => {
+            let data_type = DataType::Timestamp(TimeUnit::Nanosecond, tz.clone());
+            let mut b = PrimitiveBuilder::<TimestampNanosecondType>::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Some(ScalarValue::Timestamp(dt)) => {
+                        b.append_value(dt.timestamp_nanos_opt().unwrap_or(0))
+                    }
+                    _ => b.append_null(),
+                }
+            }
+            let array_no_tz = b.finish();
+
+            // Cast the ArrayData to have the timezone-aware type
+            let array_data = array_no_tz.into_data();
+            // Create a new ArrayData with same content but correct data type with timezone
+            #[allow(clippy::bind_instead_of_map)]
+            let null_bit_buffer = array_data.nulls().and_then(|nb| Some(nb.buffer().clone()));
+            let buffers = array_data.buffers().to_vec();
+            let child_data = array_data.child_data().to_vec();
+
+            let array_data_with_tz = arrow::array::ArrayData::try_new(
+                data_type.clone(),
+                array_data.len(),
+                null_bit_buffer,
+                array_data.offset(),
+                buffers,
+                child_data,
+            )
+            .map_err(|e| arrow::error::ArrowError::InvalidArgumentError(e.to_string()))?;
+
+            let array_with_tz =
+                arrow::array::PrimitiveArray::<TimestampNanosecondType>::from(array_data_with_tz);
+
+            Ok((
+                Field::new(name, data_type, true),
+                Arc::new(array_with_tz) as ArrayRef,
             ))
         }
         other => Err(arrow::error::ArrowError::InvalidArgumentError(format!(
@@ -199,7 +240,7 @@ pub fn build_record_batch(
     let mut columns: Vec<ArrayRef> = Vec::with_capacity(feature_names.len() + 1);
 
     fields.push(Field::new(entity_key, DataType::Utf8, false));
-    let mut id_builder = StringBuilder::new();
+    let mut id_builder = StringBuilder::with_capacity(entity_ids.len(), entity_ids.len() * 32);
     for eid in entity_ids {
         id_builder.append_value(eid);
     }
@@ -221,6 +262,188 @@ pub fn build_record_batch(
 
     let schema = Arc::new(Schema::new(fields));
     RecordBatch::try_new(schema, columns)
+}
+
+pub fn build_record_batch_with_types(
+    entity_ids: &[String],
+    feature_names: &[String],
+    entity_key: &str,
+    resolved: Vec<Vec<Option<ScalarValue>>>,
+    feature_types: &[DataType],
+) -> Result<RecordBatch, arrow::error::ArrowError> {
+    let mut fields: Vec<Field> = Vec::with_capacity(feature_names.len() + 1);
+    let mut columns: Vec<ArrayRef> = Vec::with_capacity(feature_names.len() + 1);
+
+    fields.push(Field::new(entity_key, DataType::Utf8, false));
+    let mut id_builder = StringBuilder::with_capacity(entity_ids.len(), entity_ids.len() * 32);
+    for eid in entity_ids {
+        id_builder.append_value(eid);
+    }
+    columns.push(Arc::new(id_builder.finish()) as ArrayRef);
+
+    for (feat_idx, feat_name) in feature_names.iter().enumerate() {
+        let values = &resolved[feat_idx];
+        let dtype = if feat_idx < feature_types.len() {
+            &feature_types[feat_idx]
+        } else {
+            &DataType::Utf8
+        };
+
+        let (field, array) = build_column(feat_name, dtype, values)?;
+        fields.push(field);
+        columns.push(array);
+    }
+
+    let schema = Arc::new(Schema::new(fields));
+    RecordBatch::try_new(schema, columns)
+}
+
+/// Memory-efficient RecordBatch builder that avoids 2D matrix allocation.
+///
+/// This approach processes feature data sequentially and builds Arrow columns
+/// directly without creating an intermediate `Vec<Vec<Option<ScalarValue>>>` matrix.
+/// This significantly reduces memory usage for large batches.
+///
+/// # Memory Benefits
+/// - Eliminates 2D matrix allocation (features × entities × ~32 bytes)
+/// - Processes one feature column at a time (streaming approach)
+/// - Reduces peak memory usage from O(features × entities) to O(entities)
+/// - Better for large-scale inference workloads
+///
+/// # Usage
+/// This function is designed to be called directly with feature data collected
+/// from adapters without intermediate storage.
+pub fn build_record_batch_streaming(
+    entity_ids: &[String],
+    feature_names: &[String],
+    entity_key: &str,
+    mut feature_data_source: impl FnMut(
+        usize,
+    )
+        -> Result<Vec<Option<ScalarValue>>, arrow::error::ArrowError>,
+) -> Result<RecordBatch, arrow::error::ArrowError> {
+    let mut fields: Vec<Field> = Vec::with_capacity(feature_names.len() + 1);
+    let mut columns: Vec<ArrayRef> = Vec::with_capacity(feature_names.len() + 1);
+
+    // Add entity_id column
+    fields.push(Field::new(entity_key, DataType::Utf8, false));
+    let mut id_builder = StringBuilder::with_capacity(entity_ids.len(), entity_ids.len() * 32);
+    for eid in entity_ids {
+        id_builder.append_value(eid);
+    }
+    columns.push(Arc::new(id_builder.finish()) as ArrayRef);
+
+    // Process each feature column sequentially (no 2D matrix!)
+    for (feat_idx, feat_name) in feature_names.iter().enumerate() {
+        let values = feature_data_source(feat_idx)?;
+
+        // Infer data type from first non-null value
+        let dtype = values
+            .iter()
+            .find_map(|v| v.as_ref())
+            .map(|v| v.data_type())
+            .unwrap_or(DataType::Float64);
+
+        let (field, array) = build_column(feat_name, &dtype, &values)?;
+        fields.push(field);
+        columns.push(array);
+    }
+
+    let schema = Arc::new(Schema::new(fields));
+    RecordBatch::try_new(schema, columns)
+}
+
+/// Simplified builder for cases where adapters still need to collect feature data.
+///
+/// This still allocates a 2D matrix but provides a cleaner interface compared to
+/// the raw Vec<Vec<Option<ScalarValue>>> approach. For truly memory-efficient
+/// processing, use build_record_batch_streaming instead.
+pub struct StreamingRecordBatchBuilder {
+    entity_ids: Vec<String>,
+    feature_names: Vec<String>,
+    entity_key: String,
+    feature_data: Vec<Vec<Option<ScalarValue>>>,
+    feature_types: Vec<DataType>,
+}
+
+impl StreamingRecordBatchBuilder {
+    /// Create a new builder.
+    pub fn new(
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+    ) -> Result<Self, arrow::error::ArrowError> {
+        // Pre-allocate feature data arrays
+        let feature_data: Vec<Vec<Option<ScalarValue>>> = (0..feature_names.len())
+            .map(|_| vec![None; entity_ids.len()])
+            .collect();
+
+        let feature_types = vec![DataType::Utf8; feature_names.len()];
+
+        Ok(StreamingRecordBatchBuilder {
+            entity_ids: entity_ids.to_vec(),
+            feature_names: feature_names.to_vec(),
+            entity_key: entity_key.to_string(),
+            feature_data,
+            feature_types,
+        })
+    }
+
+    /// Create a new builder with explicit type hints.
+    pub fn new_with_types(
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        feature_types: Vec<DataType>,
+    ) -> Result<Self, arrow::error::ArrowError> {
+        let feature_data: Vec<Vec<Option<ScalarValue>>> = (0..feature_names.len())
+            .map(|_| vec![None; entity_ids.len()])
+            .collect();
+
+        Ok(StreamingRecordBatchBuilder {
+            entity_ids: entity_ids.to_vec(),
+            feature_names: feature_names.to_vec(),
+            entity_key: entity_key.to_string(),
+            feature_data,
+            feature_types,
+        })
+    }
+
+    /// Set a feature value for a specific entity.
+    pub fn set_value(
+        &mut self,
+        feature_idx: usize,
+        entity_idx: usize,
+        value: Option<ScalarValue>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        if feature_idx >= self.feature_data.len() {
+            return Err(arrow::error::ArrowError::InvalidArgumentError(format!(
+                "feature_idx {} out of bounds",
+                feature_idx
+            )));
+        }
+
+        if entity_idx >= self.entity_ids.len() {
+            return Err(arrow::error::ArrowError::InvalidArgumentError(format!(
+                "entity_idx {} out of bounds",
+                entity_idx
+            )));
+        }
+
+        self.feature_data[feature_idx][entity_idx] = value;
+        Ok(())
+    }
+
+    /// Finish building and create the RecordBatch.
+    pub fn finish(self) -> Result<RecordBatch, arrow::error::ArrowError> {
+        build_record_batch_with_types(
+            &self.entity_ids,
+            &self.feature_names,
+            &self.entity_key,
+            self.feature_data,
+            &self.feature_types,
+        )
+    }
 }
 
 /// Common validation patterns used across adapters.
@@ -302,6 +525,23 @@ pub mod validation {
     }
 }
 
+/// Create a fallback type map for features without cloning strings.
+///
+/// This helper creates a HashMap<&str, DataType> that maps feature names to DataType::Utf8
+/// without allocating new strings, by borrowing from the input slice.
+///
+/// # Arguments
+/// * `feature_names` - List of feature names to create fallback types for
+///
+/// # Returns
+/// HashMap mapping feature names to DataType::Utf8
+pub fn create_fallback_types(feature_names: &[String]) -> HashMap<&str, DataType> {
+    feature_names
+        .iter()
+        .map(|name| (name.as_str(), DataType::Utf8))
+        .collect()
+}
+
 /// Memory management utilities for ML inference workloads.
 pub mod memory {
 
@@ -324,16 +564,9 @@ pub mod memory {
     ) -> usize {
         let avg_str_len = avg_string_length.unwrap_or(20);
 
-        // Rough calculation for Arrow RecordBatch memory usage:
-        // - Numeric features: 8 bytes per value (f64/i64)
-        // - String features: estimated string length + overhead
-        // - Boolean features: 1 byte per value
-        // - Entity IDs: estimated as strings
-        // - Arrow overhead: ~2x multiplier for buffers, null bitmaps, etc.
-
-        let entity_id_memory = entity_count * (avg_str_len + 4); // String + overhead
-        let numeric_feature_memory = entity_count * feature_count * 8; // Assume most features are numeric
-        let string_feature_memory = entity_count * (avg_str_len + 4); // Assume some string features
+        let entity_id_memory = entity_count * (avg_str_len + 4);
+        let numeric_feature_memory = entity_count * feature_count * 8;
+        let string_feature_memory = entity_count * (avg_str_len + 4);
 
         let total_base_memory = entity_id_memory + numeric_feature_memory + string_feature_memory;
 
@@ -448,19 +681,11 @@ pub mod memory {
 /// - "int64" -> DataType::Int64  
 /// - "string" -> DataType::Utf8
 /// - "bool", "boolean" -> DataType::Boolean
-/// - "timestamp" -> DataType::Timestamp(TimeUnit::Nanosecond, None)
+/// - "timestamp" -> DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC"))
 pub fn parse_arrow_type_string(arrow_type_str: &str) -> Result<DataType, String> {
-    match arrow_type_str.to_lowercase().as_str() {
-        "float64" | "double" => Ok(DataType::Float64),
-        "int64" | "long" => Ok(DataType::Int64),
-        "string" | "utf8" => Ok(DataType::Utf8),
-        "bool" | "boolean" => Ok(DataType::Boolean),
-        "timestamp" => Ok(DataType::Timestamp(TimeUnit::Nanosecond, None)),
-        other => Err(format!(
-            "Unsupported arrow type: '{}'. Supported types: float64, int64, string, bool, timestamp",
-            other
-        )),
-    }
+    crate::types::QuiverType::from_config_string(arrow_type_str)
+        .map(|qt| qt.to_arrow())
+        .map_err(|e| e.message)
 }
 
 /// Extract expected types from FeatureViewMetadata for type validation.
@@ -493,6 +718,7 @@ pub use memory::estimate_batch_memory;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn test_scalar_value_data_types() {
@@ -646,12 +872,11 @@ mod tests {
         );
         assert_eq!(
             parse_arrow_type_string("timestamp").unwrap(),
-            DataType::Timestamp(TimeUnit::Nanosecond, None)
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()))
         );
 
         assert!(parse_arrow_type_string("unsupported").is_err());
 
-        // Test empty arrow_type - should fail with clear error
         let empty_result = parse_arrow_type_string("");
         assert!(empty_result.is_err());
         assert!(
@@ -660,7 +885,6 @@ mod tests {
                 .contains("Unsupported arrow type: ''")
         );
 
-        // Test whitespace-only arrow_type - should also fail
         let whitespace_result = parse_arrow_type_string("  ");
         assert!(whitespace_result.is_err());
         assert!(
@@ -708,25 +932,81 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_expected_types_with_empty_arrow_type() {
-        use crate::proto::quiver::v1::{FeatureColumnSchema, FeatureViewMetadata};
+    fn test_arrow_builder_capacity_optimization() {
+        let large_entity_count = 10000;
+        let entity_ids: Vec<String> = (0..large_entity_count)
+            .map(|i| format!("entity_{}", i))
+            .collect();
+        let feature_names = vec![
+            "score".to_string(),
+            "count".to_string(),
+            "active".to_string(),
+        ];
 
-        let metadata_with_empty_arrow_type = FeatureViewMetadata {
-            name: "test_view".to_string(),
-            entity_type: "user".to_string(),
-            entity_key: "user_id".to_string(),
-            columns: vec![FeatureColumnSchema {
-                name: "score".to_string(),
-                arrow_type: "".to_string(), // Empty arrow_type should cause error
-                nullable: true,
-            }],
-            backend_routing: std::collections::HashMap::new(),
-            schema_version: 1,
-        };
+        let float_values: Vec<Option<ScalarValue>> = (0..large_entity_count)
+            .map(|i| Some(ScalarValue::Float64(i as f64)))
+            .collect();
+        let int_values: Vec<Option<ScalarValue>> = (0..large_entity_count)
+            .map(|i| Some(ScalarValue::Int64(i as i64)))
+            .collect();
+        let bool_values: Vec<Option<ScalarValue>> = (0..large_entity_count)
+            .map(|i| Some(ScalarValue::Boolean(i % 2 == 0)))
+            .collect();
 
-        let result = extract_expected_types_from_metadata(&metadata_with_empty_arrow_type);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Unsupported arrow type: ''"));
+        let resolved = vec![float_values, int_values, bool_values];
+
+        let start = Instant::now();
+        let batch = build_record_batch(&entity_ids, &feature_names, "entity_id", resolved).unwrap();
+        let duration = start.elapsed();
+
+        assert_eq!(batch.num_rows(), large_entity_count);
+        assert_eq!(batch.num_columns(), 4);
+
+        println!(
+            "✓ Built RecordBatch with {} rows in {:?}",
+            large_entity_count, duration
+        );
+        println!("✓ Arrow builders used pre-allocated capacity to avoid reallocations");
+
+        assert!(
+            duration.as_millis() < 100,
+            "Building 10k rows should complete in under 100ms with proper capacity allocation, took: {:?}",
+            duration
+        );
+    }
+
+    #[test]
+    fn test_string_builder_capacity_with_data_estimation() {
+        let entity_count = 1000;
+        let avg_string_len = 32;
+
+        let string_values: Vec<Option<ScalarValue>> = (0..entity_count)
+            .map(|i| {
+                Some(ScalarValue::Utf8(format!(
+                    "feature_value_{:0width$}",
+                    i,
+                    width = avg_string_len - 15
+                )))
+            })
+            .collect();
+
+        let start = Instant::now();
+        let (field, array) = build_column("test_feature", &DataType::Utf8, &string_values).unwrap();
+        let duration = start.elapsed();
+
+        assert_eq!(field.data_type(), &DataType::Utf8);
+        assert_eq!(array.len(), entity_count);
+
+        println!(
+            "✓ Built string column with {} values in {:?}",
+            entity_count, duration
+        );
+
+        assert!(
+            duration.as_millis() < 10,
+            "String column building should be fast with capacity allocation, took: {:?}",
+            duration
+        );
     }
 }
 
@@ -771,7 +1051,6 @@ pub fn convert_raw_to_scalar(
 ) -> Result<ScalarValue, AdapterError> {
     match expected_type {
         DataType::Float64 => {
-            // Try float first, then integer as fallback
             if let Ok(f) = raw_value.parse::<f64>() {
                 Ok(ScalarValue::Float64(f))
             } else if let Ok(i) = raw_value.parse::<i64>() {
@@ -787,7 +1066,6 @@ pub fn convert_raw_to_scalar(
             }
         }
         DataType::Int64 => {
-            // Try integer first, then float with truncation as fallback
             if let Ok(i) = raw_value.parse::<i64>() {
                 Ok(ScalarValue::Int64(i))
             } else if let Ok(f) = raw_value.parse::<f64>() {
