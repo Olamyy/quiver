@@ -1,0 +1,53 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+
+registry:
+  type: static
+  views:
+    - name: analytics_features
+      entity_type: user
+      entity_key: user_id
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          source: clickhouse_analytics
+        - name: purchase_count
+          arrow_type: int64
+          source: clickhouse_analytics
+        - name: last_purchase_date
+          arrow_type: timestamp
+          source: clickhouse_analytics
+        - name: is_premium
+          arrow_type: bool
+          source: redis_realtime
+
+    - name: realtime_features
+      entity_type: user
+      entity_key: user_id
+      columns:
+        - name: active_session_count
+          arrow_type: int64
+          source: redis_realtime
+        - name: last_click_timestamp
+          arrow_type: timestamp
+          source: redis_realtime
+        - name: current_page
+          arrow_type: string
+          source: redis_realtime
+
+adapters:
+  clickhouse_analytics:
+    type: clickhouse
+    connection_string: "clickhouse://default@localhost:9000/quiver_test"
+    source_path: "ecommerce_data"
+    max_connections: 10
+    timeout_seconds: 30
+
+  redis_realtime:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "user:{entity}"
+    parameters:
+      mget_chunk_size: 5000

@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quiver
+      POSTGRES_PASSWORD: quiver_test
+      POSTGRES_DB: quiver_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quiver -d quiver_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_DB: quiver_test
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
+
+# S3/Parquet Support
+# To use S3 adapter with real AWS credentials, pass them when running docker-compose:
+#
+#   AWS_ACCESS_KEY_ID=your_key \
+#   AWS_SECRET_ACCESS_KEY=your_secret \
+#   AWS_REGION=us-west-2 \
+#   docker-compose up -d
+#
+# Then use config/s3/basic.yaml or config/s3/with-credentials.yaml
+# The credentials will be available in the environment when Quiver server runs.

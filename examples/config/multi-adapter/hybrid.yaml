@@ -1,0 +1,53 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+
+registry:
+  type: static
+  views:
+    - name: ecommerce_features
+      entity_type: user
+      entity_key: user_id
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          source: postgres_adapter
+        - name: purchase_count
+          arrow_type: int64
+          source: postgres_adapter
+        - name: last_purchase_date
+          arrow_type: timestamp
+          source: postgres_adapter
+        - name: is_premium
+          arrow_type: bool
+          source: redis_cache
+
+    - name: session_features
+      entity_type: session
+      entity_key: session_id
+      columns:
+        - name: active_user_id
+          arrow_type: string
+          source: redis_cache
+        - name: request_count
+          arrow_type: int64
+          source: redis_cache
+        - name: last_activity
+          arrow_type: timestamp
+          source: redis_cache
+
+adapters:
+  postgres_adapter:
+    type: postgres
+    connection_string: "postgresql://quiver:${POSTGRES_PASSWORD}@localhost:5432/quiver_test"
+    source_path: "ecommerce_data"
+    max_connections: 10
+    timeout_seconds: 30
+
+  redis_cache:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "{entity}"
+    parameters:
+      mget_chunk_size: 1000

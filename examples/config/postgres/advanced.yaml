@@ -1,0 +1,68 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+  max_concurrent_rpcs: 100
+  max_message_size_mb: 16
+  compression: gzip
+
+  # Access logging
+  access_log:
+    enabled: true
+    format: json
+    include_request_body: true
+    include_response_metadata: true
+
+  # TLS configuration (optional but recommended for production)
+  tls:
+    cert_path: "/etc/quiver/tls/server.crt"
+    key_path: "/etc/quiver/tls/server.key"
+
+  # Request/response validation
+  validation:
+    request_validations:
+      - entity_ids_not_empty
+      - feature_names_not_empty
+      - batch_size_limit
+      - sql_identifier_safety
+      - timeout_bounds
+    response_validations:
+      - schema_consistency
+      - data_type_validation
+      - null_value_policies
+
+registry:
+  type: static
+  views:
+    - name: ecommerce_features
+      entity_type: user
+      entity_key: user_id
+      source_path: "ecommerce_data"
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          nullable: false
+          source: postgres_adapter
+        - name: purchase_count
+          arrow_type: int64
+          nullable: false
+          source: postgres_adapter
+        - name: last_purchase_date
+          arrow_type: timestamp
+          nullable: true
+          source: postgres_adapter
+        - name: is_premium
+          arrow_type: bool
+          nullable: false
+          source: postgres_adapter
+
+adapters:
+  postgres_adapter:
+    type: postgres
+    connection_string: "postgresql://quiver:${POSTGRES_PASSWORD}@localhost:5432/quiver_test?sslmode=require"
+    source_path: "ecommerce_data"
+    max_connections: 20
+    timeout_seconds: 30
+    tls:
+      verify_certificates: true
+      ca_cert_path: "/etc/ssl/certs/ca-bundle.crt"
