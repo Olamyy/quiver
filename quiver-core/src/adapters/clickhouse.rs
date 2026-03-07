@@ -14,6 +14,17 @@ use crate::validation::ValidationConfig;
 const BACKEND_NAME: &str = "clickhouse";
 const DEFAULT_CHUNK_SIZE: usize = 10_000;
 
+/// Query result row: entity_id + up to 4 feature values (padded with empty strings).
+/// We pad to 4 features to support dynamic feature counts while maintaining fixed deserialization.
+#[derive(clickhouse::Row, serde::Deserialize)]
+struct QueryRow {
+    entity_id: String,
+    col1: String,
+    col2: String,
+    col3: String,
+    col4: String,
+}
+
 /// ClickHouse adapter for feature storage with temporal support.
 ///
 /// The adapter uses template-based table naming and supports:
@@ -471,7 +482,7 @@ impl BackendAdapter for ClickHouseAdapter {
         let rows_result = tokio::time::timeout(timeout_duration, async {
             client
                 .query(&query)
-                .fetch_all::<(String, String, String, String, String)>()
+                .fetch_all::<QueryRow>()
                 .await
                 .map_err(|e| {
                     AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
@@ -481,7 +492,12 @@ impl BackendAdapter for ClickHouseAdapter {
         .map_err(|_| AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64))?
         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
 
-        for (entity_id, val1, val2, val3, val4) in rows_result {
+        for row in rows_result {
+            let entity_id = row.entity_id;
+            let val1 = row.col1;
+            let val2 = row.col2;
+            let val3 = row.col3;
+            let val4 = row.col4;
             if let Some(entity_idx) = entity_index.get(&entity_id) {
                 let row_values = [val1, val2, val3, val4];
 

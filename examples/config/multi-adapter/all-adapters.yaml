@@ -20,8 +20,8 @@ registry:
           source_path: "ecommerce_data"
         - name: is_premium
           arrow_type: bool
-          source: clickhouse_historical
-          source_path: "ecommerce_data"
+          source: s3_data_lake
+          source_path: "is_premium.parquet"
 
     - name: session_features
       entity_type: session
@@ -37,23 +37,6 @@ registry:
           arrow_type: timestamp
           source: redis_realtime
 
-    - name: timeseries_features
-      entity_type: sensor
-      entity_key: entity
-      columns:
-        - name: temperature
-          arrow_type: float64
-          source: clickhouse_historical
-          source_path: "timeseries_data"
-        - name: humidity
-          arrow_type: float64
-          source: clickhouse_historical
-          source_path: "timeseries_data"
-        - name: alert_triggered
-          arrow_type: bool
-          source: clickhouse_historical
-          source_path: "timeseries_data"
-
 adapters:
   postgres_historical:
     type: postgres
@@ -65,16 +48,9 @@ adapters:
   redis_realtime:
     type: redis
     connection: "redis://localhost:6379/0"
-    source_path: "{entity_type}:{entity}"
+    source_path: "{entity}"
     parameters:
       mget_chunk_size: 5000
-
-  clickhouse_historical:
-    type: clickhouse
-    connection_string: "http://localhost:8123?database=quiver_test"
-    source_path: "{feature}"
-    max_connections: 10
-    timeout_seconds: 30
 
   s3_data_lake:
     type: s3parquet

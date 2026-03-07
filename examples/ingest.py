@@ -70,8 +70,7 @@ def ingest_redis(fixtures):
         for record in scenario_def["records"]:
             entity = record["entity"]
             for col in scenario_def["schema"].keys():
-                key = f"features:{entity}:feature:{col}"
-                r.set(key, str(record.get(col, "")))
+                r.hset(entity, col, str(record.get(col, "")))
                 total += 1
 
     print(f"Redis: {total} records inserted")
