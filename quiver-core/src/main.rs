@@ -1,6 +1,7 @@
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 use quiver_core::adapters::BackendAdapter;
+use quiver_core::adapters::clickhouse::ClickHouseAdapter;
 use quiver_core::adapters::memory::MemoryAdapter;
 use quiver_core::adapters::postgres::PostgresAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
@@ -167,6 +168,34 @@ Loaded {} feature views and {} adapters",
             config::AdapterConfig::S3Parquet(s3_cfg) => {
                 let mut adapter =
                     S3ParquetAdapter::new(&s3_cfg, Some(cfg.server.validation.clone())).await?;
+
+                adapter.initialize().await?;
+
+                resolver.register_adapter(name, Arc::new(adapter) as Arc<dyn BackendAdapter>);
+            }
+            config::AdapterConfig::ClickHouse {
+                connection_string,
+                source_path,
+                max_connections,
+                timeout_seconds,
+                tls,
+                parameters,
+            } => {
+                let timeout = timeout_seconds.map(Duration::from_secs);
+                let table_template = match &source_path {
+                    quiver_core::config::SourcePath::Template(tmpl) => tmpl.as_str(),
+                    quiver_core::config::SourcePath::Structured { table, .. } => table.as_str(),
+                };
+                let mut adapter = ClickHouseAdapter::new(
+                    &connection_string,
+                    table_template,
+                    max_connections,
+                    timeout,
+                    tls.as_ref(),
+                    Some(cfg.server.validation.clone()),
+                    Some(&parameters),
+                )
+                .await?;
 
                 adapter.initialize().await?;
 

@@ -66,6 +66,11 @@ pub enum FilteredAdapterConfig {
         source_path: SourcePath,
         timeout_seconds: Option<u64>,
     },
+    ClickHouse {
+        source_path: SourcePath,
+        max_connections: Option<u32>,
+        timeout_seconds: Option<u64>,
+    },
 }
 
 impl Config {
@@ -103,6 +108,16 @@ impl Config {
                             storage_uri: s3_cfg.storage_uri.clone(),
                             source_path: s3_cfg.source_path.clone(),
                             timeout_seconds: s3_cfg.timeout_seconds,
+                        },
+                        AdapterConfig::ClickHouse {
+                            source_path,
+                            max_connections,
+                            timeout_seconds,
+                            ..
+                        } => FilteredAdapterConfig::ClickHouse {
+                            source_path: source_path.clone(),
+                            max_connections: *max_connections,
+                            timeout_seconds: *timeout_seconds,
                         },
                     };
                     (name.clone(), filtered)
@@ -144,6 +159,22 @@ impl Config {
                     {
                         errors.push(format!(
                             "adapter '{}': storage_uri must start with 's3://' or 'file://'",
+                            adapter_name
+                        ));
+                    }
+                }
+                AdapterConfig::ClickHouse {
+                    connection_string, ..
+                } => {
+                    if connection_string.is_empty() {
+                        errors.push(format!(
+                            "adapter '{}': connection_string cannot be empty",
+                            adapter_name
+                        ));
+                    }
+                    if !connection_string.contains("://") {
+                        errors.push(format!(
+                            "adapter '{}': connection_string must be a valid URL (e.g., 'clickhouse://host:port/db')",
                             adapter_name
                         ));
                     }
@@ -383,6 +414,16 @@ pub enum AdapterConfig {
         parameters: HashMap<String, serde_json::Value>,
     },
     S3Parquet(S3ParquetAdapterConfig),
+    ClickHouse {
+        connection_string: String,
+        #[serde(default = "default_clickhouse_source_path")]
+        source_path: SourcePath,
+        max_connections: Option<u32>,
+        timeout_seconds: Option<u64>,
+        tls: Option<AdapterTlsConfig>,
+        #[serde(default)]
+        parameters: HashMap<String, serde_json::Value>,
+    },
 }
 
 fn default_redis_source_path() -> SourcePath {
@@ -390,6 +431,10 @@ fn default_redis_source_path() -> SourcePath {
 }
 
 fn default_postgres_source_path() -> SourcePath {
+    SourcePath::Template("features_{feature}".to_string())
+}
+
+fn default_clickhouse_source_path() -> SourcePath {
     SourcePath::Template("features_{feature}".to_string())
 }
 
