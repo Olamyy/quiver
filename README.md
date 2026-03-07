@@ -369,37 +369,12 @@ make run
 # Roadmap
 
 | Version | Milestone | Description | Goals | Status |
-|---------|-----------|-------------|-------|--------|
-| **v0.1** | Foundations | Core feature serving prototype | Arrow Flight server, basic resolver, in‑memory adapter, static registry | ✅ |
-| **v0.2** | Multi‑backend execution | Introduce real fan‑out capabilities | Redis adapter, Parquet / object storage adapter, parallel execution engine, result merging | 🚧 |
-| **v0.3** | Caching and freshness | Introduce serving‑time performance features | Stale‑while‑revalidate cache, configurable TTL policies, cache metrics | ⬚ |
-| **v0.4** | Observability | Expose metrics for feature traffic | Feature distribution metrics, latency breakdowns, OpenTelemetry support | ⬚ |
-| **v0.5** | Registry integrations | Integrate with external feature registries | Feast registry integration, schema versioning | ⬚ |
-| **v0.6** | Streaming adapters | Add real‑time feature sources | Kafka adapter, streaming feature ingestion | ⬚ |
-| **v1.0** | Production readiness | Stabilize APIs and deployment model | Horizontal scaling, multi‑tenant support, performance benchmarks | ⬚ |
+|---------|-----------|-------------|-------|----|
+| **v0.1** | Foundations | Core feature serving prototype | Arrow Flight server, basic resolver, in‑memory adapter, static registry | [ ] |
+| **v0.2** | Multi‑backend execution | Introduce real fan‑out capabilities | Redis adapter, Parquet / object storage adapter, parallel execution engine, result merging | [ ] |
+| **v0.3** | Caching and freshness | Introduce serving‑time performance features | Stale‑while‑revalidate cache, configurable TTL policies, cache metrics | [ ]   |
+| **v0.4** | Observability | Expose metrics for feature traffic | Feature distribution metrics, latency breakdowns, OpenTelemetry support | [ ] |
+| **v0.5** | Registry integrations | Integrate with external feature registries | Feast registry integration, schema versioning | [ ]   |
+| **v0.6** | Streaming adapters | Add real‑time feature sources | Kafka adapter, streaming feature ingestion | [ ]   |
+| **v1.0** | Production readiness | Stabilize APIs and deployment model | Horizontal scaling, multi‑tenant support, performance benchmarks | [ ]   |
 
-**Legend:** ✅ Complete · 🚧 In Progress · ⬚ Planned
-
----
-
-```bash
-# Run security audit
-make audit
-
-# Run all quality checks (including security)
-make quality
-```
-
----
-
-# Contributing
-
-Contributions and experiments are welcome.
-
-Please open issues or pull requests if you would like to help shape the project.
-
----
-
-# License
-
-Apache 2.0
