@@ -133,11 +133,10 @@ impl ClickHouseAdapter {
         if let Some(q_pos) = connection_string.find('?') {
             let query_part = &connection_string[q_pos + 1..];
             for param in query_part.split('&') {
-                if let Some(db_name) = param.strip_prefix("database=") {
-                    if !db_name.is_empty() {
+                if let Some(db_name) = param.strip_prefix("database=")
+                    && !db_name.is_empty() {
                         return Ok(db_name.to_string());
                     }
-                }
             }
         }
 
@@ -473,7 +472,7 @@ impl BackendAdapter for ClickHouseAdapter {
             entity_ids,
             feature_names,
             entity_key,
-            feature_types,
+            feature_types.clone(),
         )
         .map_err(|e| {
             AdapterError::internal(BACKEND_NAME, format!("Failed to create builder: {}", e))
@@ -501,22 +500,14 @@ impl BackendAdapter for ClickHouseAdapter {
             if let Some(entity_idx) = entity_index.get(&entity_id) {
                 let row_values = [val1, val2, val3, val4];
 
-                for (feature_idx, feature_name) in feature_names.iter().enumerate() {
-                    let raw_value = if feature_idx < row_values.len() {
-                        row_values[feature_idx].clone()
-                    } else {
-                        String::new()
-                    };
-
-                    let expected_type = resolutions
-                        .get(feature_name)
-                        .map(|r| r.expected_type.clone())
-                        .unwrap_or(DataType::Utf8);
+                for (feature_idx, _feature_name) in feature_names.iter().enumerate() {
+                    let raw_value = row_values.get(feature_idx).map(|s| s.as_str()).unwrap_or("");
+                    let expected_type = &feature_types[feature_idx];
 
                     let converted_value = if raw_value.is_empty() || raw_value == "NULL" {
                         None
                     } else {
-                        Self::convert_value(&raw_value, &expected_type)
+                        Self::convert_value(raw_value, expected_type)
                     };
 
                     builder
