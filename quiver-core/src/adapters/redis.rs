@@ -319,70 +319,65 @@ impl BackendAdapter for RedisAdapter {
 
         self.validate_redis_key_safety(feature_names, entity_ids)?;
 
-        // Build all keys and metadata for chunked execution
-        // Note: This pre-allocates all keys for concurrent chunk processing.
-        // Memory usage: ~(features × entities × 64 bytes) for keys + metadata
-        // This is still much more efficient than the previous 2D ScalarValue matrix
-        let mut all_keys = Vec::new();
-        let mut key_metadata = Vec::new(); // (feature_idx, entity_idx, expected_type)
+        // Build entity keys (one per entity) for HMGET-based hash retrieval
+        let mut entity_keys = Vec::new();
+        let mut entity_key_mapping = Vec::new(); // Maps entity_key_idx to entity_idx
 
-        for (feature_idx, feature_name) in feature_names.iter().enumerate() {
-            let resolution = resolutions.get(feature_name);
-
-            let effective_source_path = resolution
-                .and_then(|r| r.source_path.as_ref())
-                .unwrap_or(&self.default_source_path);
-
-            let expected_type = resolution
-                .map(|r| r.expected_type.clone())
-                .unwrap_or(DataType::Utf8);
-
-            for (entity_idx, entity_id) in entity_ids.iter().enumerate() {
-                let key =
-                    self.build_key_unchecked(feature_name, entity_id, effective_source_path)?;
-
-                all_keys.push(key);
-                key_metadata.push((
-                    feature_idx,
-                    entity_idx,
-                    expected_type.clone(),
-                    feature_name.clone(),
-                ));
-            }
+        for (entity_idx, entity_id) in entity_ids.iter().enumerate() {
+            // Use the default source path to build the hash key (with {entity} substitution only)
+            let entity_key = self.build_key_unchecked("", entity_id, &self.default_source_path)?;
+            entity_keys.push(entity_key);
+            entity_key_mapping.push(entity_idx);
         }
 
-        // Chunked concurrent MGET requests
+        // Collect feature types for streaming builder
+        let feature_types: Vec<_> = feature_names
+            .iter()
+            .map(|name| {
+                resolutions
+                    .get(name)
+                    .map(|r| r.expected_type.clone())
+                    .unwrap_or(DataType::Utf8)
+            })
+            .collect();
+
+        // Chunked concurrent HMGET requests
         let query_future = async {
-            // Split keys and metadata into chunks
-            let key_chunks: Vec<_> = all_keys.chunks(self.mget_chunk_size).collect();
-            let metadata_chunks: Vec<_> = key_metadata.chunks(self.mget_chunk_size).collect();
+            // Split entity keys into chunks
+            let entity_key_chunks: Vec<_> = entity_keys.chunks(self.mget_chunk_size).collect();
+            let entity_mapping_chunks: Vec<_> = entity_key_mapping.chunks(self.mget_chunk_size).collect();
 
             // Create futures for each chunk
-            let chunk_futures: Vec<_> = key_chunks
+            let chunk_futures: Vec<_> = entity_key_chunks
                 .into_iter()
-                .zip(metadata_chunks)
+                .zip(entity_mapping_chunks)
                 .enumerate()
-                .map(|(chunk_idx, (keys_chunk, metadata_chunk))| {
+                .map(|(_, (keys_chunk, mappings_chunk))| {
                     let mut conn = self.connection.clone();
                     let keys_vec = keys_chunk.to_vec();
-                    let metadata_vec = metadata_chunk.to_vec();
+                    let mappings_vec = mappings_chunk.to_vec();
+                    let feature_names_vec = feature_names.to_vec();
 
                     async move {
-                        let raw_values: Vec<Option<String>> =
-                            conn.mget(&keys_vec).await.map_err(|e| {
-                                AdapterError::internal(
-                                    BACKEND_NAME,
-                                    format!(
-                                        "Redis chunked MGET failed for chunk {}: {}",
-                                        chunk_idx, e
-                                    ),
-                                )
-                            })?;
+                        // For each entity key, HMGET all requested features
+                        let mut results = Vec::new();
+                        for key in keys_vec {
+                            let hash_values: Vec<Option<String>> =
+                                conn.hmget(&key, &feature_names_vec).await.map_err(|e| {
+                                    AdapterError::internal(
+                                        BACKEND_NAME,
+                                        format!(
+                                            "Redis HMGET failed for key '{}': {}",
+                                            key, e
+                                        ),
+                                    )
+                                })?;
+                            results.push(hash_values);
+                        }
 
-                        Ok::<
-                            (Vec<Option<String>>, Vec<(usize, usize, DataType, String)>),
-                            AdapterError,
-                        >((raw_values, metadata_vec))
+                        Ok::<(Vec<Vec<Option<String>>>, Vec<usize>), AdapterError>(
+                            (results, mappings_vec),
+                        )
                     }
                 })
                 .collect();
@@ -390,23 +385,12 @@ impl BackendAdapter for RedisAdapter {
             // Execute all chunks concurrently
             let chunk_results = join_all(chunk_futures).await;
 
-            // Collect feature types for streaming builder
-            let feature_types: Vec<_> = feature_names
-                .iter()
-                .map(|name| {
-                    resolutions
-                        .get(name)
-                        .map(|r| r.expected_type.clone())
-                        .unwrap_or(DataType::Utf8)
-                })
-                .collect();
-
             // Create streaming builder - no 2D matrix allocation!
             let mut builder = StreamingRecordBatchBuilder::new_with_types(
                 entity_ids,
                 feature_names,
                 entity_key,
-                feature_types,
+                feature_types.clone(),
             )
             .map_err(|e| {
                 AdapterError::internal(
@@ -415,33 +399,39 @@ impl BackendAdapter for RedisAdapter {
                 )
             })?;
 
-            // Process all chunk results and stream directly to Arrow builders
+            // Process all chunk results: for each entity, set all feature values
             for chunk_result in chunk_results {
-                let (raw_values, metadata_chunk) = chunk_result?;
+                let (hash_results_per_entity, entity_indices_in_chunk) = chunk_result?;
 
-                for (key_idx_in_chunk, raw_value) in raw_values.into_iter().enumerate() {
-                    let (feature_idx, entity_idx, expected_type, feature_name) =
-                        &metadata_chunk[key_idx_in_chunk];
+                for (chunk_entity_idx, hash_values) in hash_results_per_entity.into_iter().enumerate() {
+                    let entity_idx = entity_indices_in_chunk[chunk_entity_idx];
 
-                    let converted_value = match raw_value {
-                        Some(raw) => Some(convert_raw_to_scalar(
-                            &raw,
-                            expected_type,
-                            BACKEND_NAME,
-                            feature_name,
-                        )?),
-                        None => None,
-                    };
+                    // hash_values is Vec<Option<String>> where each element is a feature value
+                    for (feature_idx, (raw_value, expected_type)) in
+                        hash_values.into_iter().zip(&feature_types).enumerate()
+                    {
+                        let feature_name = &feature_names[feature_idx];
 
-                    // Stream directly to builder - no intermediate storage!
-                    builder
-                        .set_value(*feature_idx, *entity_idx, converted_value)
-                        .map_err(|e| {
-                            AdapterError::internal(
+                        let converted_value = match raw_value {
+                            Some(raw) => Some(convert_raw_to_scalar(
+                                &raw,
+                                expected_type,
                                 BACKEND_NAME,
-                                format!("Failed to set value: {}", e),
-                            )
-                        })?;
+                                feature_name,
+                            )?),
+                            None => None,
+                        };
+
+                        // Stream directly to builder - no intermediate storage!
+                        builder
+                            .set_value(feature_idx, entity_idx, converted_value)
+                            .map_err(|e| {
+                                AdapterError::internal(
+                                    BACKEND_NAME,
+                                    format!("Failed to set value: {}", e),
+                                )
+                            })?;
+                    }
                 }
             }
 

@@ -60,7 +60,7 @@ def generate_data(scenario, fixtures, count, seed=42):
 
     elif scenario == "sessions":
         for i in range(count):
-            session_id = f"session:s{1000 + i:04d}"
+            session_id = f"session:{1000 + i}"
             user_id = f"user:{random.randint(1, 1000)}"
             timestamp = datetime.utcnow() - timedelta(minutes=random.randint(0, 60))
             record = {

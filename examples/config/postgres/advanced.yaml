@@ -14,9 +14,9 @@ server:
     include_response_metadata: true
 
   # TLS configuration (optional but recommended for production)
-  tls:
-    cert_path: "/etc/quiver/tls/server.crt"
-    key_path: "/etc/quiver/tls/server.key"
+#  tls:
+#    cert_path: "/etc/quiver/tls/server.crt"
+#    key_path: "/etc/quiver/tls/server.key"
 
   # Request/response validation
   validation:

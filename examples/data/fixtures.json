@@ -40,9 +40,9 @@
         "last_activity": "timestamp"
       },
       "seed_data": [
-        {"entity": "session:s001", "timestamp": "2025-03-07T12:05:30Z", "active_user_id": "user:101", "request_count": 42, "last_activity": "2025-03-07T12:05:30Z"},
-        {"entity": "session:s002", "timestamp": "2025-03-07T12:03:45Z", "active_user_id": "user:102", "request_count": 15, "last_activity": "2025-03-07T12:03:45Z"},
-        {"entity": "session:s003", "timestamp": "2025-03-07T12:06:00Z", "active_user_id": "user:103", "request_count": 128, "last_activity": "2025-03-07T12:06:00Z"}
+        {"entity": "session:101", "timestamp": "2025-03-07T12:05:30Z", "active_user_id": "user:101", "request_count": 42, "last_activity": "2025-03-07T12:05:30Z"},
+        {"entity": "session:102", "timestamp": "2025-03-07T12:03:45Z", "active_user_id": "user:102", "request_count": 15, "last_activity": "2025-03-07T12:03:45Z"},
+        {"entity": "session:103", "timestamp": "2025-03-07T12:06:00Z", "active_user_id": "user:103", "request_count": 128, "last_activity": "2025-03-07T12:06:00Z"}
       ]
     }
   }
