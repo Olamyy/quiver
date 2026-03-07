@@ -10,9 +10,8 @@ Quiver focuses on a part of the ML stack that is often overlooked: **the serving
 
 # Overview
 
-Modern ML systems typically invest heavily in feature computation and model training, but the real‑time path that delivers features to models often evolves organically inside application code.
-
-Typical inference pipelines end up performing several expensive transformations:
+ML systems typically invest heavily in feature computation and model training, but the real‑time path for feature delivery to models often evolves organically inside application code. 
+For example, a typical ML inference pipeline ends up performing several expensive transformations:
 
 1. Fetch feature rows from multiple backends
 2. Deserialize row‑oriented data
@@ -40,7 +39,7 @@ Serialize rows
         |
         v
 Online store
-(Redis / key‑value)
+(Redis / key‑value / PostgreSQL / S3 / Parquet/ ClickHouse)
         |
         v
 Application server
@@ -53,7 +52,7 @@ Application server
 Model inference
 ```
 
-Several inefficiencies appear in this design.
+This already shows multiple inefficiencies.
 
 ## Repeated serialization
 
@@ -221,22 +220,6 @@ These metrics can help detect issues like feature drift or missing data that mig
 
 ---
 
-# Current Status
-
-Quiver is currently in **v0.1 alpha**.
-
-The project is intended for experimentation and early evaluation.
-
-Implemented components include:
-
-* Arrow Flight server
-* basic feature resolver
-* in‑memory adapter
-* static feature registry
-* gRPC health checks
-* Python client
-
----
 
 # Quick Start
 
@@ -282,19 +265,6 @@ Configuration precedence:
 
 The [`examples/`](examples/) directory contains configuration examples for different deployment scenarios:
 
-- **[`memory-only.yaml`](examples/config/memory.yaml)** - Development and high-performance in-memory caching
-- **[`development.yaml`](examples/config/development.yaml)** - Local development with PostgreSQL + Redis
-- **[`postgres.yaml`](examples/config/postgres.yaml)** - Production with persistent feature storage
-- **[`redis.yaml`](examples/config/redis.yaml)** - Ultra-low latency real-time inference
-- **[`hybrid-multi-adapter.yaml`](examples/config/hybrid-multi-adapter.yaml)** - Complex ML pipelines with mixed adapters
-
-### Quick Start with Examples
-
-Use the interactive configuration selector:
-
-```bash
-./examples/quick-start.sh
-```
 
 ### Docker Development Environment
 
@@ -398,88 +368,19 @@ make run
 
 # Roadmap
 
-## v0.1 — Foundations
+| Version | Milestone | Description | Goals | Status |
+|---------|-----------|-------------|-------|--------|
+| **v0.1** | Foundations | Core feature serving prototype | Arrow Flight server, basic resolver, in‑memory adapter, static registry | ✅ |
+| **v0.2** | Multi‑backend execution | Introduce real fan‑out capabilities | Redis adapter, Parquet / object storage adapter, parallel execution engine, result merging | 🚧 |
+| **v0.3** | Caching and freshness | Introduce serving‑time performance features | Stale‑while‑revalidate cache, configurable TTL policies, cache metrics | ⬚ |
+| **v0.4** | Observability | Expose metrics for feature traffic | Feature distribution metrics, latency breakdowns, OpenTelemetry support | ⬚ |
+| **v0.5** | Registry integrations | Integrate with external feature registries | Feast registry integration, schema versioning | ⬚ |
+| **v0.6** | Streaming adapters | Add real‑time feature sources | Kafka adapter, streaming feature ingestion | ⬚ |
+| **v1.0** | Production readiness | Stabilize APIs and deployment model | Horizontal scaling, multi‑tenant support, performance benchmarks | ⬚ |
 
-Core feature serving prototype.
-
-Goals:
-
-* Arrow Flight server
-* basic resolver
-* in‑memory adapter
-* static registry
-
-## v0.2 — Multi‑backend execution
-
-Introduce real fan‑out capabilities.
-
-Goals:
-
-* Redis adapter
-* Parquet / object storage adapter
-* parallel execution engine
-* result merging
-
-## v0.3 — Caching and freshness
-
-Introduce serving‑time performance features.
-
-Goals:
-
-* stale‑while‑revalidate cache
-* configurable TTL policies
-* cache metrics
-
-## v0.4 — Observability
-
-Expose metrics for feature traffic.
-
-Goals:
-
-* feature distribution metrics
-* latency breakdowns
-* OpenTelemetry support
-
-## v0.5 — Registry integrations
-
-Integrate with external feature registries.
-
-Goals:
-
-* Feast registry integration
-* schema versioning
-
-## v0.6 — Streaming adapters
-
-Add real‑time feature sources.
-
-Goals:
-
-* Kafka adapter
-* streaming feature ingestion
-
-## v1.0 — Production readiness
-
-Stabilize APIs and deployment model.
-
-Goals:
-
-* horizontal scaling
-* multi‑tenant support
-* performance benchmarks
+**Legend:** ✅ Complete · 🚧 In Progress · ⬚ Planned
 
 ---
-
-# Security
-
-Quiver follows security best practices for ML infrastructure:
-
-- **Encrypted Connections**: TLS required for PostgreSQL, Redis, and gRPC in production
-- **Input Validation**: All entity IDs and feature names validated to prevent injection attacks  
-- **Secure Credentials**: Environment variable-based credential management
-- **Regular Audits**: Automated security dependency scanning
-
-For detailed security information, see [SECURITY.md](SECURITY.md).
 
 ```bash
 # Run security audit

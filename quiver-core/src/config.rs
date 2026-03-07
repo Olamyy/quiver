@@ -438,6 +438,27 @@ fn default_clickhouse_source_path() -> SourcePath {
     SourcePath::Template("features_{feature}".to_string())
 }
 
+/// Substitute ${ENV_VAR} placeholders with environment variable values
+fn substitute_env_vars(config_str: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let re = regex::Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")?;
+
+    let result = re.replace_all(config_str, |caps: &regex::Captures| {
+        let var_name = &caps[1];
+        match std::env::var(var_name) {
+            Ok(value) => value,
+            Err(_) => {
+                tracing::warn!(
+                    "Environment variable '{}' referenced in config but not set. Keeping placeholder.",
+                    var_name
+                );
+                caps[0].to_string()
+            }
+        }
+    });
+
+    Ok(result.to_string())
+}
+
 impl Config {
     pub fn load(config_path: Option<&str>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut builder = config::Config::builder()
@@ -449,7 +470,20 @@ impl Config {
             if !path_buf.exists() {
                 return Err(format!("Configuration file not found: {}", path).into());
             }
-            builder = builder.add_source(config::File::from(path_buf).required(true));
+
+            // Read file and substitute environment variables
+            let config_str = std::fs::read_to_string(&path_buf)?;
+            let substituted = substitute_env_vars(&config_str)?;
+
+            // Parse substituted config as YAML
+            let config_value: serde_yaml::Value = serde_yaml::from_str(&substituted)?;
+            builder = builder.add_source(
+                config::File::from_str(
+                    &serde_yaml::to_string(&config_value)?,
+                    config::FileFormat::Yaml,
+                )
+                .required(true),
+            );
         } else {
             builder = builder.add_source(config::File::with_name("config").required(false));
         }
@@ -691,6 +725,86 @@ adapters:
             }
         } else {
             panic!("Expected PostgreSQL adapter config");
+        }
+    }
+
+    #[test]
+    fn test_env_var_substitution() {
+        unsafe {
+            std::env::set_var("TEST_PASSWORD", "secret123");
+            std::env::set_var("TEST_REGION", "us-west-2");
+        }
+
+        let config_str = r#"
+server:
+  host: 0.0.0.0
+  port: 8815
+
+registry:
+  type: static
+  views: []
+
+adapters:
+  postgres_adapter:
+    type: postgres
+    connection_string: "postgresql://user:${TEST_PASSWORD}@localhost:5432/db"
+  clickhouse_adapter:
+    type: clickhouse
+    connection_string: "clickhouse://default:${TEST_PASSWORD}@localhost:9000/quiver"
+    source_path: "features"
+"#;
+
+        let result = substitute_env_vars(config_str).expect("Substitution failed");
+
+        assert!(result.contains("secret123"));
+        assert!(result.contains("postgresql://user:secret123@localhost"));
+        assert!(result.contains("clickhouse://default:secret123@localhost"));
+        assert!(!result.contains("${TEST_PASSWORD}"));
+
+        unsafe {
+            std::env::remove_var("TEST_PASSWORD");
+            std::env::remove_var("TEST_REGION");
+        }
+    }
+
+    #[test]
+    fn test_env_var_substitution_missing_var() {
+        let config_str = r#"
+server:
+  host: 0.0.0.0
+  port: 8815
+
+adapters:
+  postgres_adapter:
+    type: postgres
+    connection_string: "postgresql://user:${NONEXISTENT_VAR}@localhost/db"
+"#;
+
+        // Should not fail, just keep the placeholder
+        let result = substitute_env_vars(config_str).expect("Substitution should not fail");
+        assert!(result.contains("${NONEXISTENT_VAR}"));
+    }
+
+    #[test]
+    fn test_env_var_substitution_multiple_in_line() {
+        unsafe {
+            std::env::set_var("USER", "testuser");
+            std::env::set_var("PASS", "testpass");
+            std::env::set_var("HOST", "localhost");
+        }
+
+        let config_str = r#"connection_string: "${USER}:${PASS}@${HOST}:5432""#;
+        let result = substitute_env_vars(config_str).expect("Substitution failed");
+
+        assert_eq!(
+            result,
+            r#"connection_string: "testuser:testpass@localhost:5432""#
+        );
+
+        unsafe {
+            std::env::remove_var("USER");
+            std::env::remove_var("PASS");
+            std::env::remove_var("HOST");
         }
     }
 }

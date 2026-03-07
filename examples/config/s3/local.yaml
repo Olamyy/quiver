@@ -1,0 +1,31 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+
+registry:
+  type: static
+  views:
+    - name: ecommerce_features
+      entity_type: user
+      entity_key: user_id
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          source: local_adapter
+        - name: purchase_count
+          arrow_type: int64
+          source: local_adapter
+        - name: last_purchase_date
+          arrow_type: timestamp
+          source: local_adapter
+        - name: is_premium
+          arrow_type: bool
+          source: local_adapter
+
+adapters:
+  local_adapter:
+    type: s3_parquet
+    storage_uri: "file:///data/features"
+    source_path: "{feature}.parquet"
+    timeout_seconds: 30

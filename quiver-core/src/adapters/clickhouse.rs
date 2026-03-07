@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::datatypes::DataType;
@@ -15,6 +14,17 @@ use crate::validation::ValidationConfig;
 const BACKEND_NAME: &str = "clickhouse";
 const DEFAULT_CHUNK_SIZE: usize = 10_000;
 
+/// Query result row: entity_id + up to 4 feature values (padded with empty strings).
+/// We pad to 4 features to support dynamic feature counts while maintaining fixed deserialization.
+#[derive(clickhouse::Row, serde::Deserialize)]
+struct QueryRow {
+    entity_id: String,
+    col1: String,
+    col2: String,
+    col3: String,
+    col4: String,
+}
+
 /// ClickHouse adapter for feature storage with temporal support.
 ///
 /// The adapter uses template-based table naming and supports:
@@ -26,6 +36,7 @@ const DEFAULT_CHUNK_SIZE: usize = 10_000;
 pub struct ClickHouseAdapter {
     client: Client,
     table_template: String,
+    database_name: String,
     timeout_default: Duration,
     health_timeout: Duration,
     capabilities: AdapterCapabilities,
@@ -55,19 +66,18 @@ impl ClickHouseAdapter {
     ) -> Result<Self, AdapterError> {
         Self::validate_connection_string(connection_string)?;
 
-        let mut client = Client::default()
-            .with_url(connection_string)
-            .with_option("max_insert_block_size", "1000000")
-            .with_option("max_block_size", "1000000");
+        // Extract database name from connection string
+        let database_name = Self::extract_database_name(connection_string)
+            .unwrap_or_else(|_| "quiver_test".to_string());
 
-        if let Some(max_conn) = max_connections {
-            client = client.with_option("max_connections", max_conn.to_string().as_str());
-        }
+        let client = Client::default()
+            .with_url(connection_string)
+            .with_database(&database_name);
 
         let timeout_duration = timeout.unwrap_or(Duration::from_secs(30));
 
         info!(
-            "Successfully initialized ClickHouse adapter with {} max connections",
+            "ClickHouse adapter created with {} max connections",
             max_connections.unwrap_or(20)
         );
 
@@ -82,8 +92,9 @@ impl ClickHouseAdapter {
         Ok(Self {
             client,
             table_template: table_template.to_string(),
+            database_name,
             timeout_default: timeout_duration,
-            health_timeout: Duration::from_secs(3),
+            health_timeout: Duration::from_secs(10),
             capabilities: Self::static_capabilities(),
             validation_config: validation_config.unwrap_or_default(),
             chunk_size,
@@ -105,16 +116,32 @@ impl ClickHouseAdapter {
             ));
         }
 
-        if !connection_string.starts_with("clickhouse://")
-            && !connection_string.starts_with("clickhousedb://")
-        {
+        if !connection_string.starts_with("http://") && !connection_string.starts_with("https://") {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
-                "Connection string must start with 'clickhouse://' or 'clickhousedb://'",
+                "Connection string must start with 'http://' or 'https://' (e.g., 'http://localhost:8123')",
             ));
         }
 
         Ok(())
+    }
+
+    /// Extract database name from ClickHouse HTTP connection string.
+    /// Expects format: "http://host:port" with optional "?database=name" parameter.
+    /// Falls back to "quiver_test" if not specified (for examples).
+    fn extract_database_name(connection_string: &str) -> Result<String, AdapterError> {
+        if let Some(q_pos) = connection_string.find('?') {
+            let query_part = &connection_string[q_pos + 1..];
+            for param in query_part.split('&') {
+                if let Some(db_name) = param.strip_prefix("database=")
+                    && !db_name.is_empty()
+                {
+                    return Ok(db_name.to_string());
+                }
+            }
+        }
+
+        Ok("quiver_test".to_string())
     }
 
     /// Get adapter capabilities without requiring a connection.
@@ -214,6 +241,7 @@ impl ClickHouseAdapter {
         };
 
         Self::validate_identifier(&table_name)?;
+
         Ok(table_name)
     }
 
@@ -256,14 +284,31 @@ impl ClickHouseAdapter {
         table_name: &str,
         entity_ids: &[String],
         entity_key: &str,
+        feature_names: &[String],
     ) -> String {
         let quoted_entity_key = Self::quote_identifier(entity_key);
         let quoted_table_name = Self::quote_identifier(table_name);
         let entity_list = Self::build_entity_list(entity_ids);
 
+        let feature_columns = feature_names
+            .iter()
+            .map(|f| Self::quote_identifier(f))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let padded_features = if feature_names.len() < 4 {
+            let mut features = feature_columns.clone();
+            for _ in feature_names.len()..4 {
+                features.push_str(", ''");
+            }
+            features
+        } else {
+            feature_columns
+        };
+
         format!(
-            "SELECT {} as entity_id, * EXCEPT entity_id FROM {} WHERE {} IN ({})",
-            quoted_entity_key, quoted_table_name, quoted_entity_key, entity_list
+            "SELECT {} as entity_id, {} FROM {} WHERE {} IN ({})",
+            quoted_entity_key, padded_features, quoted_table_name, quoted_entity_key, entity_list
         )
     }
 
@@ -274,23 +319,42 @@ impl ClickHouseAdapter {
         entity_ids: &[String],
         entity_key: &str,
         as_of: DateTime<Utc>,
+        feature_names: &[String],
     ) -> String {
         let quoted_entity_key = Self::quote_identifier(entity_key);
         let quoted_table_name = Self::quote_identifier(table_name);
         let entity_list = Self::build_entity_list(entity_ids);
         let as_of_str = as_of.format("%Y-%m-%d %H:%M:%S").to_string();
 
+        let feature_columns = feature_names
+            .iter()
+            .map(|f| Self::quote_identifier(f))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let padded_features = if feature_names.len() < 4 {
+            let mut features = feature_columns.clone();
+            for _ in feature_names.len()..4 {
+                features.push_str(", ''");
+            }
+            features
+        } else {
+            feature_columns.clone()
+        };
+
         format!(
-            "SELECT {} as entity_id, * EXCEPT entity_id, rn FROM (
+            "SELECT {} as entity_id, {} FROM (
                 SELECT
                     {},
-                    *,
+                    {},
                     ROW_NUMBER() OVER (PARTITION BY {} ORDER BY feature_ts DESC) as rn
                 FROM {}
                 WHERE {} IN ({}) AND feature_ts <= '{}'
             ) WHERE rn = 1",
             quoted_entity_key,
+            padded_features,
             quoted_entity_key,
+            padded_features,
             quoted_entity_key,
             quoted_table_name,
             quoted_entity_key,
@@ -325,45 +389,157 @@ impl BackendAdapter for ClickHouseAdapter {
             ));
         }
 
-        let _timeout = timeout.unwrap_or(self.timeout_default);
+        let fallback_resolutions: std::collections::HashMap<String, super::FeatureResolution> =
+            feature_names
+                .iter()
+                .map(|name| {
+                    (
+                        name.clone(),
+                        super::FeatureResolution {
+                            expected_type: DataType::Utf8,
+                            source_path: None,
+                        },
+                    )
+                })
+                .collect();
 
-        let feature_name = &feature_names[0];
-        let table_name = self.resolve_table_name(feature_name, None)?;
+        self.get_with_resolutions(
+            entity_ids,
+            feature_names,
+            entity_key,
+            &fallback_resolutions,
+            as_of,
+            timeout,
+        )
+        .await
+    }
 
-        let _query = if let Some(as_of_time) = as_of {
-            self.build_temporal_query(&table_name, entity_ids, entity_key, as_of_time)
-        } else {
-            self.build_current_state_query(&table_name, entity_ids, entity_key)
-        };
-        let mut columns = vec![];
-        let mut fields = vec![];
-
-        for feature_name in feature_names {
-            let dtype = DataType::Float64;
-            fields.push(arrow::datatypes::Field::new(
-                feature_name,
-                dtype.clone(),
-                true,
+    #[allow(clippy::too_many_arguments)]
+    async fn get_with_resolutions(
+        &self,
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        resolutions: &HashMap<String, super::FeatureResolution>,
+        as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
+    ) -> Result<RecordBatch, AdapterError> {
+        if entity_ids.is_empty() || feature_names.is_empty() {
+            return Err(AdapterError::invalid(
+                BACKEND_NAME,
+                "entity_ids and feature_names cannot be empty",
             ));
-            let null_values: Vec<Option<ScalarValue>> =
-                vec![Some(ScalarValue::Null); entity_ids.len()];
-            let (_, array) = super::utils::build_column(feature_name, &dtype, &null_values)
-                .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))?;
-            columns.push(array);
         }
 
-        let schema = arrow::datatypes::Schema::new(fields);
-        RecordBatch::try_new(Arc::new(schema), columns)
-            .map_err(|e| AdapterError::arrow(BACKEND_NAME, e.to_string()))
+        let timeout_duration = timeout.unwrap_or(self.timeout_default);
+        let feature_name = &feature_names[0];
+        let source_path = resolutions
+            .get(feature_name)
+            .and_then(|r| r.source_path.as_ref());
+        let table_name = self.resolve_table_name(feature_name, source_path)?;
+
+        let query = if let Some(as_of_time) = as_of {
+            self.build_temporal_query(
+                &table_name,
+                entity_ids,
+                entity_key,
+                as_of_time,
+                feature_names,
+            )
+        } else {
+            self.build_current_state_query(&table_name, entity_ids, entity_key, feature_names)
+        };
+
+        tracing::info!("ClickHouse query: {}", query);
+
+        let client = self.client.clone();
+
+        let mut entity_index = std::collections::HashMap::new();
+        for (idx, id) in entity_ids.iter().enumerate() {
+            entity_index.insert(id.clone(), idx);
+        }
+
+        let feature_types: Vec<_> = feature_names
+            .iter()
+            .map(|name| {
+                resolutions
+                    .get(name)
+                    .map(|r| r.expected_type.clone())
+                    .unwrap_or(DataType::Utf8)
+            })
+            .collect();
+
+        let mut builder = super::utils::StreamingRecordBatchBuilder::new_with_types(
+            entity_ids,
+            feature_names,
+            entity_key,
+            feature_types.clone(),
+        )
+        .map_err(|e| {
+            AdapterError::internal(BACKEND_NAME, format!("Failed to create builder: {}", e))
+        })?;
+
+        let rows_result = tokio::time::timeout(timeout_duration, async {
+            client
+                .query(&query)
+                .fetch_all::<QueryRow>()
+                .await
+                .map_err(|e| {
+                    AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
+                })
+        })
+        .await
+        .map_err(|_| AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64))?
+        .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
+
+        for row in rows_result {
+            let entity_id = row.entity_id;
+            let val1 = row.col1;
+            let val2 = row.col2;
+            let val3 = row.col3;
+            let val4 = row.col4;
+            if let Some(entity_idx) = entity_index.get(&entity_id) {
+                let row_values = [val1, val2, val3, val4];
+
+                for (feature_idx, _feature_name) in feature_names.iter().enumerate() {
+                    let raw_value = row_values
+                        .get(feature_idx)
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    let expected_type = &feature_types[feature_idx];
+
+                    let converted_value = if raw_value.is_empty() || raw_value == "NULL" {
+                        None
+                    } else {
+                        Self::convert_value(raw_value, expected_type)
+                    };
+
+                    builder
+                        .set_value(feature_idx, *entity_idx, converted_value)
+                        .map_err(|e| {
+                            AdapterError::internal(
+                                BACKEND_NAME,
+                                format!("Failed to set value: {}", e),
+                            )
+                        })?;
+                }
+            }
+        }
+
+        builder.finish().map_err(|e| {
+            AdapterError::internal(BACKEND_NAME, format!("Failed to finish builder: {}", e))
+        })
     }
 
     async fn health(&self) -> HealthStatus {
         let start = std::time::Instant::now();
-        let healthy = tokio::time::timeout(self.health_timeout, async {
-            self.client.query("SELECT 1").execute().await.is_ok()
-        })
-        .await
-        .is_ok();
+        let healthy = matches!(
+            tokio::time::timeout(self.health_timeout, async {
+                self.client.query("SELECT 1").execute().await
+            })
+            .await,
+            Ok(Ok(_))
+        );
 
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
 
@@ -383,7 +559,6 @@ impl BackendAdapter for ClickHouseAdapter {
     }
 
     async fn initialize(&mut self) -> Result<(), AdapterError> {
-        // Verify connection by attempting a simple query
         info!("ClickHouse adapter initialized successfully");
         Ok(())
     }
@@ -400,16 +575,36 @@ mod tests {
 
     #[test]
     fn test_validate_connection_string() {
+        assert!(ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok());
         assert!(
-            ClickHouseAdapter::validate_connection_string("clickhouse://localhost:9000").is_ok()
-        );
-        assert!(
-            ClickHouseAdapter::validate_connection_string("clickhousedb://user:pass@host:9000/db")
-                .is_ok()
+            ClickHouseAdapter::validate_connection_string("https://user:pass@host:8123").is_ok()
         );
         assert!(ClickHouseAdapter::validate_connection_string("").is_err());
         assert!(ClickHouseAdapter::validate_connection_string("postgresql://localhost").is_err());
         assert!(ClickHouseAdapter::validate_connection_string(&"x".repeat(2049)).is_err());
+    }
+
+    #[test]
+    fn test_extract_database_name() {
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("http://localhost:8123?database=quiver_test")
+                .unwrap(),
+            "quiver_test"
+        );
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("http://localhost:8123?database=my_db")
+                .unwrap(),
+            "my_db"
+        );
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("https://localhost:8123?database=test_db")
+                .unwrap(),
+            "test_db"
+        );
+        assert_eq!(
+            ClickHouseAdapter::extract_database_name("http://localhost:8123").unwrap(),
+            "quiver_test"
+        );
     }
 
     #[test]
@@ -440,9 +635,7 @@ mod tests {
 
     #[test]
     fn test_build_current_state_query() {
-        assert!(
-            ClickHouseAdapter::validate_connection_string("clickhouse://localhost:9000").is_ok()
-        );
+        assert!(ClickHouseAdapter::validate_connection_string("http://localhost:8123").is_ok());
     }
 
     #[test]

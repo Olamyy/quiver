@@ -2947,6 +2947,7 @@ dependencies = [
  "prost",
  "prost-types",
  "redis",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",

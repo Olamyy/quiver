@@ -36,6 +36,7 @@ aws-credential-types = "1.1"
 tokio-stream = "0.1"
 lru = "0.16"
 clickhouse = { version = "0.14", features = ["rustls-tls-webpki-roots"] }
+regex = "1.10"
 
 [build-dependencies]
 tonic-prost-build = "0.14"
