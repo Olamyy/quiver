@@ -448,10 +448,10 @@ impl BackendAdapter for ClickHouseAdapter {
             AdapterError::internal(BACKEND_NAME, format!("Failed to create builder: {}", e))
         })?;
 
-        let rows_result = tokio::time::timeout(timeout_duration, async {
+        let result_string = tokio::time::timeout(timeout_duration, async {
             client
                 .query(&query)
-                .fetch_all::<(String, String, String, String, String)>()
+                .fetch_all::<String>()
                 .await
                 .map_err(|e| {
                     AdapterError::internal(BACKEND_NAME, format!("Query execution failed: {}", e))
@@ -461,13 +461,16 @@ impl BackendAdapter for ClickHouseAdapter {
         .map_err(|_| AdapterError::timeout(BACKEND_NAME, timeout_duration.as_millis() as u64))?
         .map_err(|e| AdapterError::internal(BACKEND_NAME, e.to_string()))?;
 
-        for (entity_id, val1, val2, val3, val4) in rows_result {
+        for line in result_string {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let entity_id = parts[0].to_string();
             if let Some(entity_idx) = entity_index.get(&entity_id) {
-                let row_values = [val1, val2, val3, val4];
-
                 for (feature_idx, feature_name) in feature_names.iter().enumerate() {
-                    let raw_value = if feature_idx < row_values.len() {
-                        row_values[feature_idx].clone()
+                    let raw_value = if feature_idx + 1 < parts.len() {
+                        parts[feature_idx + 1].to_string()
                     } else {
                         String::new()
                     };

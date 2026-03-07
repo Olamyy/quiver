@@ -8,17 +8,16 @@ registry:
   views:
     - name: ecommerce_features
       entity_type: user
-      entity_key: user_id
+      entity_key: entity
       columns:
         - name: spend_30d
           arrow_type: float64
           source: postgres_historical
+          source_path: "ecommerce_data"
         - name: purchase_count
           arrow_type: int64
           source: postgres_historical
-        - name: last_purchase_date
-          arrow_type: timestamp
-          source: s3_data_lake
+          source_path: "ecommerce_data"
         - name: is_premium
           arrow_type: bool
           source: clickhouse_historical
@@ -26,7 +25,7 @@ registry:
 
     - name: session_features
       entity_type: session
-      entity_key: session_id
+      entity_key: entity
       columns:
         - name: active_user_id
           arrow_type: string
@@ -40,7 +39,7 @@ registry:
 
     - name: timeseries_features
       entity_type: sensor
-      entity_key: sensor_id
+      entity_key: entity
       columns:
         - name: temperature
           arrow_type: float64
@@ -79,7 +78,7 @@ adapters:
 
   s3_data_lake:
     type: s3parquet
-    storage_uri: "s3://${AWS_BUCKET}/features"
+    storage_uri: "s3://airflow-ml-platform-test/features"
     source_path: "{feature}.parquet"
     timeout_seconds: 30
     auth:
