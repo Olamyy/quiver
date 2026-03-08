@@ -343,4 +343,164 @@ adapters: {}
         let unavailable_priority = router.backend_priority(TemporalCompatibility::Unavailable);
         assert_eq!(unavailable_priority, None, "Unavailable backends are skipped");
     }
+
+    #[test]
+    fn test_downtime_strategy_fail_default() {
+        let config_yaml = r#"
+server:
+  host: localhost
+  port: 8815
+
+registry:
+  type: static
+  views: []
+
+adapters: {}
+"#;
+
+        let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
+        assert_eq!(
+            config.server.fanout.downtime_strategy,
+            quiver_core::config::DowntimeStrategy::Fail,
+            "Default downtime_strategy is Fail"
+        );
+    }
+
+    #[test]
+    fn test_downtime_strategy_explicit_configuration() {
+        let config_yaml = r#"
+server:
+  host: localhost
+  port: 8815
+  fanout:
+    downtime_strategy: return_available
+
+registry:
+  type: static
+  views: []
+
+adapters: {}
+"#;
+
+        let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
+        assert_eq!(
+            config.server.fanout.downtime_strategy,
+            quiver_core::config::DowntimeStrategy::ReturnAvailable,
+            "downtime_strategy can be set to return_available"
+        );
+    }
+
+    #[test]
+    fn test_fallback_source_optional_with_fail_strategy() {
+        let config_yaml = r#"
+server:
+  host: localhost
+  port: 8815
+  fanout:
+    downtime_strategy: fail
+
+registry:
+  type: static
+  views:
+    - name: test_view
+      entity_type: user
+      entity_key: id
+      columns:
+        - name: score
+          arrow_type: float64
+          source: primary_adapter
+
+adapters:
+  primary_adapter:
+    type: memory
+"#;
+
+        let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
+        let result = config.validate();
+
+        assert!(
+            result.is_ok(),
+            "fallback_source is optional when downtime_strategy=fail"
+        );
+    }
+
+    #[test]
+    fn test_fallback_source_required_with_use_fallback_strategy() {
+        let config_yaml = r#"
+server:
+  host: localhost
+  port: 8815
+  fanout:
+    downtime_strategy: use_fallback
+
+registry:
+  type: static
+  views:
+    - name: test_view
+      entity_type: user
+      entity_key: id
+      columns:
+        - name: score
+          arrow_type: float64
+          source: primary_adapter
+
+adapters:
+  primary_adapter:
+    type: memory
+  fallback_adapter:
+    type: memory
+"#;
+
+        let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
+        let result = config.validate();
+
+        assert!(
+            result.is_err(),
+            "fallback_source is required when downtime_strategy=use_fallback"
+        );
+        let errors = result.unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("fallback_source") && e.contains("use_fallback")),
+            "Error should mention fallback_source requirement"
+        );
+    }
+
+    #[test]
+    fn test_fallback_source_valid_with_use_fallback_strategy() {
+        let config_yaml = r#"
+server:
+  host: localhost
+  port: 8815
+  fanout:
+    downtime_strategy: use_fallback
+
+registry:
+  type: static
+  views:
+    - name: test_view
+      entity_type: user
+      entity_key: id
+      columns:
+        - name: score
+          arrow_type: float64
+          source: primary_adapter
+          fallback_source: fallback_adapter
+
+adapters:
+  primary_adapter:
+    type: memory
+  fallback_adapter:
+    type: memory
+"#;
+
+        let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
+        let result = config.validate();
+
+        assert!(
+            result.is_ok(),
+            "Config is valid when fallback_source is provided with use_fallback strategy"
+        );
+    }
 }

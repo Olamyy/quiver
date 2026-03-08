@@ -2,6 +2,26 @@ use crate::validation::ValidationConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Downtime strategy for handling backend failures during fanout.
+///
+/// Determines behavior when a backend fails, times out, or is unavailable.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DowntimeStrategy {
+    /// Fail the entire request if any backend fails (default, safe).
+    Fail,
+    /// Return available data from successful backends, skip failed ones (partial results).
+    ReturnAvailable,
+    /// Try fallback backend if primary fails/times out (requires fallback_source configured).
+    UseFallback,
+}
+
+impl Default for DowntimeStrategy {
+    fn default() -> Self {
+        Self::Fail
+    }
+}
+
 /// Source path configuration - can be a string template or structured path
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
@@ -213,6 +233,18 @@ impl Config {
                 errors.push(format!("view '{}' has no columns", view.name));
             }
 
+            // Check if use_fallback strategy requires fallback_source on all columns
+            if self.server.fanout.downtime_strategy == DowntimeStrategy::UseFallback {
+                for col in &view.columns {
+                    if col.fallback_source.is_none() {
+                        errors.push(format!(
+                            "view '{}' column '{}': downtime_strategy='use_fallback' requires fallback_source to be defined",
+                            view.name, col.name
+                        ));
+                    }
+                }
+            }
+
             for col in &view.columns {
                 if let Some(adapter) = self.adapters.get(&col.source) {
                     if let AdapterConfig::Redis {
@@ -325,6 +357,10 @@ pub struct FanoutServerConfig {
     /// Strategy for handling partial failures when backends return fewer entities than requested.
     #[serde(default = "default_partial_failure_strategy")]
     pub partial_failure_strategy: String,
+
+    /// Strategy for handling backend downtime (timeout, error, unavailable).
+    #[serde(default)]
+    pub downtime_strategy: DowntimeStrategy,
 }
 
 impl Default for FanoutServerConfig {
@@ -333,6 +369,7 @@ impl Default for FanoutServerConfig {
             enabled: true,
             max_concurrent_backends: 10,
             partial_failure_strategy: "null_fill".to_string(),
+            downtime_strategy: DowntimeStrategy::Fail,
         }
     }
 }
@@ -400,6 +437,9 @@ pub struct ColumnConfig {
     pub nullable: bool,
     pub source: String,
     pub source_path: Option<SourcePath>,
+    /// Fallback backend to use if primary backend fails/times out.
+    /// Required when downtime_strategy=use_fallback.
+    pub fallback_source: Option<String>,
 }
 
 fn default_true() -> bool {
