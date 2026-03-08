@@ -1,6 +1,6 @@
 use crate::adapters::utils::{StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
 use crate::adapters::{
-    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
+    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus, OrderingGuarantee,
     TemporalCapability,
 };
 use crate::config::SourcePath;
@@ -99,6 +99,7 @@ impl RedisAdapter {
             optimal_batch_size: Some(100),
             typical_latency_ms: 5,
             supports_parallel_requests: true,
+            ordering_guarantee: OrderingGuarantee::Unordered,
         };
 
         let mget_chunk_size = parameters

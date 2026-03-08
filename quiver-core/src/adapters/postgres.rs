@@ -11,7 +11,7 @@ use tracing::info;
 
 use super::utils::{ScalarValue, StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
 use super::{
-    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
+    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus, OrderingGuarantee,
     TemporalCapability,
 };
 use crate::validation::{RequestValidation, ValidationConfig};
@@ -248,6 +248,7 @@ impl PostgresAdapter {
             optimal_batch_size: Some(100),
             typical_latency_ms: 50,
             supports_parallel_requests: true,
+            ordering_guarantee: OrderingGuarantee::OrderedByRequest,
         }
     }
 
