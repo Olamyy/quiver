@@ -174,11 +174,8 @@ Loaded {} feature views and {} adapters",
                             Ok((name, Arc::new(adapter) as Arc<dyn BackendAdapter>))
                         }
                         config::AdapterConfig::S3Parquet(s3_cfg) => {
-                            let mut adapter = S3ParquetAdapter::new(
-                                &s3_cfg,
-                                Some(validation_config),
-                            )
-                            .await?;
+                            let mut adapter =
+                                S3ParquetAdapter::new(&s3_cfg, Some(validation_config)).await?;
 
                             adapter.initialize().await?;
 

@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod config;
+pub mod fanout;
 pub mod logging;
 pub mod proto;
 pub mod registry;

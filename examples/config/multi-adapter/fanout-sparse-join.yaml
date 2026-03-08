@@ -33,7 +33,7 @@ registry:
 adapters:
   postgres_historical:
     type: postgres
-    connection_string: "postgresql://quiver:${POSTGRES_PASSWORD}@localhost:5432/quiver_test"
+    connection_string: "postgresql://quiver:quiver_test@localhost:5432/quiver_test"
     source_path: "ecommerce_data"
     max_connections: 10
     timeout_seconds: 25

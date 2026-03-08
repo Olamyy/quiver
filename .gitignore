@@ -215,4 +215,4 @@ test_env/*
 *.rlib
 quiver-core/config.yaml
 conf.yaml
-AGENT.md
+*.md
