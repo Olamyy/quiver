@@ -115,64 +115,217 @@ impl FanoutMerger {
         Ok(merged)
     }
 
-    /// Execute a LEFT JOIN between two RecordBatches.
+    /// Execute a LEFT JOIN between two RecordBatches on entity_id.
     ///
-    /// Assumes both tables have been returned from adapters in request entity order,
-    /// with entity_id as the first column. This phase does a simple positional merge,
-    /// preserving all rows from the left table and adding non-entity_id columns from right.
+    /// Performs entity-aligned join: left rows are all preserved, right rows are merged by
+    /// matching entity_id. Missing entities from right get null-filled for right's columns.
+    /// Right table may have fewer rows than left (sparse result from fanout dispatch).
     ///
     /// # Arguments
     ///
-    /// * `left_table` - Current merged state (preserves all rows)
-    /// * `right_table` - Backend result (features to add)
+    /// * `left_table` - Left table (all rows preserved)
+    /// * `right_table` - Right table (sparse, matches by entity_id)
     ///
     /// # Returns
     ///
-    /// Joined RecordBatch with left rows preserved and right feature columns added
-    ///
-    /// # Assumptions
-    ///
-    /// - Both tables have matching row counts (same number of entities)
-    /// - Both tables have rows in the same order (matching request entity order)
-    /// - Both tables include entity_id as first column (adapter convention)
-    /// - No actual key-based join needed (implicit positional join on row index)
+    /// Joined RecordBatch with all left rows + right columns (null-filled where no match)
     fn left_join(left_table: &RecordBatch, right_table: &RecordBatch) -> Result<RecordBatch, MergeError> {
-        // Verify both tables have the same number of rows (required for positional merge)
-        if left_table.num_rows() != right_table.num_rows() {
-            return Err(MergeError::MergeFailed(format!(
-                "LEFT JOIN requires matching row counts: left={}, right={}",
-                left_table.num_rows(),
-                right_table.num_rows()
-            )));
+        use arrow::array::{Array, StringArray};
+        use std::collections::HashMap;
+
+        // Extract entity_id columns (always first column)
+        let left_entity_col = left_table
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| {
+                MergeError::MergeFailed("Left entity_id column is not StringArray".to_string())
+            })?;
+
+        let right_entity_col = right_table
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| {
+                MergeError::MergeFailed("Right entity_id column is not StringArray".to_string())
+            })?;
+
+        // Build index: right table row index by entity_id
+        let mut right_index: HashMap<String, usize> = HashMap::new();
+        for i in 0..right_entity_col.len() {
+            let entity_id: &str = right_entity_col.value(i);
+            right_index.insert(entity_id.to_string(), i);
         }
 
-        // Collect right column info, skipping entity_id (always first column in adapter output)
-        let right_schema = right_table.schema();
-        let right_cols: Vec<_> = (1..right_table.num_columns())  // Start from 1 to skip entity_id at index 0
-            .map(|i| {
-                let field = right_schema.field(i);
-                (i, field.clone())
-            })
-            .collect();
+        let left_num_rows = left_table.num_rows();
+        let right_num_cols = right_table.num_columns();
 
-        // Build output schema: all left columns + right feature columns (no duplicate entity_id)
-        let mut output_fields = left_table.schema().fields().iter().cloned().collect::<Vec<_>>();
         let mut output_columns = Vec::new();
+        let mut output_fields: Vec<Arc<arrow::datatypes::Field>> =
+            left_table.schema().fields().iter().cloned().collect();
 
         // Add all left columns
         for i in 0..left_table.num_columns() {
             output_columns.push(left_table.column(i).clone());
         }
 
-        // Add right columns (skipping entity_id at index 0)
-        for (i, field) in right_cols {
-            output_fields.push(Arc::new(field));
-            output_columns.push(right_table.column(i).clone());
+        // Add right columns (skip entity_id), null-filled where no match
+        let right_schema = right_table.schema();
+        for right_col_idx in 1..right_num_cols {
+            let right_field = right_schema.field(right_col_idx).clone();
+            output_fields.push(Arc::new(right_field.clone()));
+
+            let right_col = right_table.column(right_col_idx);
+
+            // Build the column using type dispatch
+            let new_col = Self::build_matched_column(
+                left_entity_col,
+                &right_index,
+                right_col.as_ref(),
+                &right_field.data_type(),
+                left_num_rows,
+            )?;
+            output_columns.push(new_col);
         }
 
-        let output_schema = Arc::new(Schema::new(output_fields));
+        let output_schema = Arc::new(Schema::new(
+            output_fields
+                .into_iter()
+                .map(|f| f.as_ref().clone())
+                .collect::<Vec<_>>(),
+        ));
         RecordBatch::try_new(output_schema, output_columns)
             .map_err(|e| MergeError::Arrow(e.to_string()))
+    }
+
+    /// Build a matched column by joining left (all rows) with right (sparse rows)
+    fn build_matched_column(
+        left_entity_col: &arrow::array::StringArray,
+        right_index: &std::collections::HashMap<String, usize>,
+        right_col: &dyn arrow::array::Array,
+        data_type: &arrow::datatypes::DataType,
+        left_num_rows: usize,
+    ) -> Result<Arc<dyn arrow::array::Array>, MergeError> {
+        use arrow::array::*;
+        use arrow::datatypes::DataType;
+
+        match data_type {
+            DataType::Utf8 => {
+                let right_arr = right_col
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .ok_or_else(|| MergeError::TypeMismatch("String array downcast failed".to_string()))?;
+                let mut builder = StringBuilder::with_capacity(left_num_rows, left_num_rows * 32);
+                for left_idx in 0..left_num_rows {
+                    let entity_id = left_entity_col.value(left_idx);
+                    if let Some(&right_idx) = right_index.get(entity_id) {
+                        if right_col.is_null(right_idx) {
+                            builder.append_null();
+                        } else {
+                            builder.append_value(right_arr.value(right_idx));
+                        }
+                    } else {
+                        builder.append_null();
+                    }
+                }
+                Ok(Arc::new(builder.finish()))
+            }
+            DataType::Int64 => {
+                let right_arr = right_col
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .ok_or_else(|| MergeError::TypeMismatch("Int64 array downcast failed".to_string()))?;
+                let mut builder = Int64Builder::with_capacity(left_num_rows);
+                for left_idx in 0..left_num_rows {
+                    let entity_id = left_entity_col.value(left_idx);
+                    if let Some(&right_idx) = right_index.get(entity_id) {
+                        if right_col.is_null(right_idx) {
+                            builder.append_null();
+                        } else {
+                            builder.append_value(right_arr.value(right_idx));
+                        }
+                    } else {
+                        builder.append_null();
+                    }
+                }
+                Ok(Arc::new(builder.finish()))
+            }
+            DataType::Float64 => {
+                let right_arr = right_col
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .ok_or_else(|| MergeError::TypeMismatch("Float64 array downcast failed".to_string()))?;
+                let mut builder = Float64Builder::with_capacity(left_num_rows);
+                for left_idx in 0..left_num_rows {
+                    let entity_id = left_entity_col.value(left_idx);
+                    if let Some(&right_idx) = right_index.get(entity_id) {
+                        if right_col.is_null(right_idx) {
+                            builder.append_null();
+                        } else {
+                            builder.append_value(right_arr.value(right_idx));
+                        }
+                    } else {
+                        builder.append_null();
+                    }
+                }
+                Ok(Arc::new(builder.finish()))
+            }
+            DataType::Boolean => {
+                let right_arr = right_col
+                    .as_any()
+                    .downcast_ref::<BooleanArray>()
+                    .ok_or_else(|| MergeError::TypeMismatch("Boolean array downcast failed".to_string()))?;
+                let mut builder = BooleanBuilder::with_capacity(left_num_rows);
+                for left_idx in 0..left_num_rows {
+                    let entity_id = left_entity_col.value(left_idx);
+                    if let Some(&right_idx) = right_index.get(entity_id) {
+                        if right_col.is_null(right_idx) {
+                            builder.append_null();
+                        } else {
+                            builder.append_value(right_arr.value(right_idx));
+                        }
+                    } else {
+                        builder.append_null();
+                    }
+                }
+                Ok(Arc::new(builder.finish()))
+            }
+            DataType::Timestamp(_, tz) => {
+                let right_arr = right_col
+                    .as_any()
+                    .downcast_ref::<TimestampNanosecondArray>()
+                    .ok_or_else(|| MergeError::TypeMismatch("Timestamp array downcast failed".to_string()))?;
+                let mut builder = TimestampNanosecondBuilder::with_capacity(left_num_rows);
+                for left_idx in 0..left_num_rows {
+                    let entity_id = left_entity_col.value(left_idx);
+                    if let Some(&right_idx) = right_index.get(entity_id) {
+                        if right_col.is_null(right_idx) {
+                            builder.append_null();
+                        } else {
+                            builder.append_value(right_arr.value(right_idx));
+                        }
+                    } else {
+                        builder.append_null();
+                    }
+                }
+
+                // Preserve timezone from schema
+                let array = builder.finish();
+                let mut array_data = array.into_data();
+                // Reconstruct with timezone
+                let ts_type = arrow::datatypes::DataType::Timestamp(
+                    arrow::datatypes::TimeUnit::Nanosecond,
+                    tz.clone(),
+                );
+                array_data = array_data.clone().into_builder().data_type(ts_type).build().unwrap();
+                let typed_array = TimestampNanosecondArray::from(array_data);
+                Ok(Arc::new(typed_array))
+            }
+            dt => Err(MergeError::TypeMismatch(format!(
+                "Unsupported type in join: {:?}",
+                dt
+            ))),
+        }
     }
 
     /// Phase 3: Fill nulls for missing entities.

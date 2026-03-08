@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-/// Fanout latency metrics tracking 11 instrumentation points per RFC v0.3.
+/// Fanout latency metrics tracking 11 instrumentation points.
 ///
 /// Captures latency at each phase of the fanout pipeline:
 /// 1. Registry lookup
