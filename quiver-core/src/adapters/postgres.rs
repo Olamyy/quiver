@@ -12,7 +12,7 @@ use tracing::info;
 use super::utils::{ScalarValue, StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
 use super::{
     AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
-    TemporalCapability,
+    OrderingGuarantee, TemporalCapability,
 };
 use crate::validation::{RequestValidation, ValidationConfig};
 
@@ -248,6 +248,7 @@ impl PostgresAdapter {
             optimal_batch_size: Some(100),
             typical_latency_ms: 50,
             supports_parallel_requests: true,
+            ordering_guarantee: OrderingGuarantee::OrderedByRequest,
         }
     }
 
@@ -730,7 +731,6 @@ impl BackendAdapter for PostgresAdapter {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],

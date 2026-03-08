@@ -2,6 +2,7 @@
 
 from .client import Client
 from .table import FeatureTable
+from .observability import ObservabilityClient
 from .models import (
     FeatureRequest,
     RequestContext,
@@ -25,6 +26,7 @@ __version__ = "0.1.0"
 __all__ = [
     "Client",
     "FeatureTable",
+    "ObservabilityClient",
     "FeatureRequest",
     "RequestContext",
     "OutputOptions",

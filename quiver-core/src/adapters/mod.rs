@@ -76,7 +76,7 @@ pub trait BackendAdapter: Send + Sync {
     /// This method allows the caller to specify both the expected Arrow types and optional
     /// specific source paths for each feature in a single combined lookup.
     ///
-    /// # Arguments  
+    /// # Arguments
     /// - `entity_ids` - Entity identifiers to fetch features for
     /// - `feature_names` - Feature names to retrieve
     /// - `entity_key` - The column name used as entity identifier
@@ -90,7 +90,6 @@ pub trait BackendAdapter: Send + Sync {
     /// # Default Implementation
     /// The default implementation calls `get()`. Adapters should override this to take
     /// advantage of type checking and per-feature source paths.
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],
@@ -102,6 +101,47 @@ pub trait BackendAdapter: Send + Sync {
     ) -> Result<RecordBatch, AdapterError> {
         self.get(entity_ids, feature_names, entity_key, as_of, timeout)
             .await
+    }
+
+    /// Fetch features for entities without null-filling (sparse result).
+    ///
+    /// Used during fanout execution when the merge layer will handle entity alignment.
+    /// Returns only rows for entities that exist in the backend, in any order.
+    /// The merge layer will then perform entity_id-based LEFT JOIN to align results.
+    ///
+    /// # Arguments
+    /// - `entity_ids` - Entity identifiers to fetch features for (used for caching/sharding hints)
+    /// - `feature_names` - Feature names to retrieve
+    /// - `entity_key` - The column name used as entity identifier
+    /// - `resolutions` - Map of feature names to their combined FeatureResolution
+    /// - `as_of` - Point-in-time for temporal queries (`None` = current time)
+    /// - `timeout` - Maximum time to wait for response (`None` = adapter default)
+    ///
+    /// # Returns
+    /// RecordBatch with only rows that exist in the backend (no null-filling).
+    /// May have fewer rows than requested and in any order.
+    ///
+    /// # Default Implementation
+    /// Defaults to `get_with_resolutions()` which includes null-filling.
+    /// Adapters should override this for efficient sparse retrieval.
+    async fn get_sparse_with_resolutions(
+        &self,
+        entity_ids: &[String],
+        feature_names: &[String],
+        entity_key: &str,
+        resolutions: &std::collections::HashMap<String, FeatureResolution>,
+        as_of: Option<DateTime<Utc>>,
+        timeout: Option<Duration>,
+    ) -> Result<RecordBatch, AdapterError> {
+        self.get_with_resolutions(
+            entity_ids,
+            feature_names,
+            entity_key,
+            resolutions,
+            as_of,
+            timeout,
+        )
+        .await
     }
 
     /// Check backend health and return operational metrics.
@@ -129,6 +169,34 @@ pub trait BackendAdapter: Send + Sync {
     }
 }
 
+/// Result ordering guarantee for adapter output.
+///
+/// Declares whether an adapter naturally returns results in a specific order,
+/// which allows the fanout merge layer to skip expensive alignment operations.
+///
+/// Per RFC v0.3, this enables optimizing the merge pipeline from O(n log n) to O(n)
+/// when all backends provide ordered output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderingGuarantee {
+    /// Results are returned in the exact order of the request entity_ids list.
+    /// Enables direct column assembly without alignment overhead.
+    ///
+    /// Example: PostgreSQL adapter queries `WHERE entity_id IN (...) ORDER BY entity_ids[index]`
+    OrderedByRequest,
+
+    /// Results are sorted by entity_id (ascending).
+    /// Requires one-pass merge to align with request order, but still O(n) not O(n*m).
+    ///
+    /// Example: DuckDB adapter returns `ORDER BY entity_id`
+    OrderedByEntityId,
+
+    /// Results order is arbitrary; requires full entity_id index for alignment.
+    /// Incurs O(n) HashMap construction cost during merge.
+    ///
+    /// Example: Redis adapter returns results from parallel MGET calls without ordering
+    Unordered,
+}
+
 /// Adapter capabilities and operational characteristics.
 ///
 /// This structure provides metadata about adapter behavior that allows the resolver to make
@@ -149,6 +217,10 @@ pub struct AdapterCapabilities {
 
     /// Whether adapter supports parallel requests for the same feature set.
     pub supports_parallel_requests: bool,
+
+    /// Ordering guarantee for result rows per RFC v0.3.
+    /// Used by fanout merge to optimize alignment (skip for ordered, use HashMap for unordered).
+    pub ordering_guarantee: OrderingGuarantee,
 }
 
 /// Temporal data capability metadata.

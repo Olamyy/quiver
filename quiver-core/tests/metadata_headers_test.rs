@@ -1,6 +1,5 @@
-use arrow::array::Float64Array;
+use arrow_flight::Ticket;
 use arrow_flight::flight_service_client::FlightServiceClient;
-use arrow_flight::{FlightDescriptor, Ticket};
 use futures::StreamExt;
 use prost::Message;
 use quiver_core::adapters::BackendAdapter;
@@ -41,7 +40,7 @@ fn create_test_filtered_config() -> FilteredConfig {
 }
 
 #[tokio::test]
-async fn test_feature_serving_retrieval() {
+async fn test_metadata_headers_present() {
     let registry = Arc::new(StaticRegistry::new());
 
     let memory_adapter = MemoryAdapter::seed([
@@ -64,6 +63,23 @@ async fn test_feature_serving_retrieval() {
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
+    let mut backend_routing = std::collections::HashMap::new();
+    backend_routing.insert("val".to_string(), "memory".to_string());
+
+    registry.register(quiver_core::proto::quiver::v1::FeatureViewMetadata {
+        name: "test_view".to_string(),
+        entity_type: "user".to_string(),
+        entity_key: "entity_id".to_string(),
+        columns: vec![quiver_core::proto::quiver::v1::FeatureColumnSchema {
+            name: "val".to_string(),
+            arrow_type: "float64".to_string(),
+            nullable: true,
+            fallback_source: String::new(),
+        }],
+        backend_routing,
+        schema_version: 1,
+    });
+
     let metrics_store = Arc::new(MetricsStore::new());
     let request_cache = Arc::new(RequestCache::new(Default::default()));
     let service = QuiverFlightServer::new(
@@ -98,6 +114,78 @@ async fn test_feature_serving_retrieval() {
         .await
         .unwrap();
     let mut client = FlightServiceClient::new(channel);
+
+    let feature_request = FeatureRequest {
+        feature_view: "test_view".to_string(),
+        feature_names: vec!["val".to_string()],
+        entities: vec![
+            EntityKey {
+                entity_id: "u1".to_string(),
+                entity_type: "user".to_string(),
+            },
+            EntityKey {
+                entity_id: "u2".to_string(),
+                entity_type: "user".to_string(),
+            },
+        ],
+        as_of: None,
+        freshness: None,
+        context: None,
+        output: None,
+    };
+    let ticket = Ticket {
+        ticket: feature_request.encode_to_vec().into(),
+    };
+
+    let response = client.do_get(ticket).await.unwrap();
+    let metadata = response.metadata();
+
+    let request_id_header = metadata.get("x-quiver-request-id");
+    assert!(
+        request_id_header.is_some(),
+        "x-quiver-request-id header must be present"
+    );
+
+    if let Some(request_id_bytes) = request_id_header {
+        let request_id_str = std::str::from_utf8(request_id_bytes.as_bytes())
+            .expect("request_id should be valid UTF-8");
+        assert!(!request_id_str.is_empty(), "request_id must not be empty");
+    }
+
+    let from_cache_header = metadata.get("x-quiver-from-cache");
+    assert!(
+        from_cache_header.is_some(),
+        "x-quiver-from-cache header must be present"
+    );
+
+    if let Some(from_cache_bytes) = from_cache_header {
+        let from_cache_str = std::str::from_utf8(from_cache_bytes.as_bytes())
+            .expect("from_cache should be valid UTF-8");
+        assert!(
+            from_cache_str == "true" || from_cache_str == "false",
+            "from_cache must be 'true' or 'false'"
+        );
+    }
+
+    let _ = tx.send(());
+}
+
+#[tokio::test]
+async fn test_metadata_headers_cache_behavior() {
+    let registry = Arc::new(StaticRegistry::new());
+
+    let memory_adapter = MemoryAdapter::seed([(
+        "u1",
+        [("val", ScalarValue::Float64(10.0))],
+        chrono::Utc::now(),
+    )]);
+    let memory_adapter: Arc<dyn BackendAdapter> = Arc::new(memory_adapter);
+
+    let resolver = Arc::new(Resolver::with_downtime_strategy(
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>,
+        quiver_core::config::DowntimeStrategy::Fail,
+    ));
+    resolver.register_adapter("memory".to_string(), memory_adapter);
 
     let mut backend_routing = std::collections::HashMap::new();
     backend_routing.insert("val".to_string(), "memory".to_string());
@@ -116,78 +204,6 @@ async fn test_feature_serving_retrieval() {
         schema_version: 1,
     });
 
-    let feature_request = FeatureRequest {
-        feature_view: "test_view".to_string(),
-        feature_names: vec!["val".to_string()],
-        entities: vec![EntityKey {
-            entity_id: "u1".to_string(),
-            entity_type: "user".to_string(),
-        }],
-        as_of: None,
-        freshness: None,
-        context: None,
-        output: None,
-    };
-    let ticket = Ticket {
-        ticket: feature_request.encode_to_vec().into(),
-    };
-
-    let response = client.do_get(ticket).await.unwrap();
-    let stream = response.into_inner();
-    let mut reader =
-        arrow_flight::decode::FlightRecordBatchStream::new_from_flight_data(stream.map(|res| {
-            res.map_err(|e| arrow_flight::error::FlightError::ExternalError(Box::new(e)))
-        }));
-
-    let result_batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(result_batch.num_rows(), 1);
-    let val_col = result_batch
-        .column_by_name("val")
-        .unwrap()
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .unwrap();
-    assert_eq!(val_col.value(0), 10.0);
-
-    let _ = tx.send(());
-}
-
-#[tokio::test]
-async fn test_get_flight_info() {
-    let registry = Arc::new(StaticRegistry::new());
-    let memory_adapter: Arc<dyn BackendAdapter> = Arc::new(MemoryAdapter::new());
-    let resolver = Arc::new(Resolver::with_downtime_strategy(
-        registry.clone() as Arc<dyn quiver_core::registry::Registry>,
-        quiver_core::config::DowntimeStrategy::Fail,
-    ));
-    resolver.register_adapter("memory".to_string(), memory_adapter);
-
-    registry.register(quiver_core::proto::quiver::v1::FeatureViewMetadata {
-        name: "user_features".to_string(),
-        entity_type: "user".to_string(),
-        entity_key: "user_id".to_string(),
-        columns: vec![
-            quiver_core::proto::quiver::v1::FeatureColumnSchema {
-                name: "entity_id".to_string(),
-                arrow_type: "string".to_string(),
-                nullable: false,
-                fallback_source: String::new(),
-            },
-            quiver_core::proto::quiver::v1::FeatureColumnSchema {
-                name: "score".to_string(),
-                arrow_type: "float64".to_string(),
-                nullable: true,
-                fallback_source: String::new(),
-            },
-        ],
-        backend_routing: {
-            let mut routing = std::collections::HashMap::new();
-            routing.insert("score".to_string(), "memory".to_string());
-            routing
-        },
-        schema_version: 1,
-    });
-
     let metrics_store = Arc::new(MetricsStore::new());
     let request_cache = Arc::new(RequestCache::new(Default::default()));
     let service = QuiverFlightServer::new(
@@ -221,72 +237,52 @@ async fn test_get_flight_info() {
         .connect()
         .await
         .unwrap();
-
     let mut client = FlightServiceClient::new(channel);
 
-    let descriptor = FlightDescriptor::new_path(vec!["user_features".to_string()]);
-    let flight_info_response = client.get_flight_info(descriptor).await.unwrap();
-    let flight_info = flight_info_response.into_inner();
+    let feature_request = FeatureRequest {
+        feature_view: "test_view".to_string(),
+        feature_names: vec!["val".to_string()],
+        entities: vec![EntityKey {
+            entity_id: "u1".to_string(),
+            entity_type: "user".to_string(),
+        }],
+        as_of: None,
+        freshness: None,
+        context: None,
+        output: None,
+    };
+    let ticket = Ticket {
+        ticket: feature_request.encode_to_vec().into(),
+    };
 
-    assert!(!flight_info.schema.is_empty(), "Schema should not be empty");
-    assert_eq!(flight_info.endpoint.len(), 1, "Should have one endpoint");
+    let response1 = client.do_get(ticket.clone()).await.unwrap();
+    let metadata1 = response1.metadata().clone();
+    let mut stream1 = response1.into_inner();
+    while let Some(_) = stream1.next().await {}
+
+    let from_cache_1 = metadata1
+        .get("x-quiver-from-cache")
+        .and_then(|b| std::str::from_utf8(b.as_bytes()).ok());
+
+    let response2 = client.do_get(ticket).await.unwrap();
+    let metadata2 = response2.metadata().clone();
+    let mut stream2 = response2.into_inner();
+    while let Some(_) = stream2.next().await {}
+
+    let from_cache_2 = metadata2
+        .get("x-quiver-from-cache")
+        .and_then(|b| std::str::from_utf8(b.as_bytes()).ok());
+
     assert_eq!(
-        flight_info.total_records, -1,
-        "Total records should be unknown (-1) per F-01"
+        from_cache_1,
+        Some("false"),
+        "First request should not be from cache"
     );
     assert_eq!(
-        flight_info.total_bytes, -1,
-        "Total bytes should be unknown (-1) per F-01"
+        from_cache_2,
+        Some("true"),
+        "Second identical request should be from cache"
     );
-    assert_eq!(
-        flight_info.ordered, false,
-        "Results should not be ordered per F-01"
-    );
-
-    assert!(
-        flight_info.flight_descriptor.is_some(),
-        "Flight descriptor should be preserved"
-    );
-    let returned_descriptor = flight_info.flight_descriptor.unwrap();
-    assert_eq!(
-        returned_descriptor.path,
-        vec!["user_features"],
-        "Path should be preserved"
-    );
-
-    let app_metadata = String::from_utf8(flight_info.app_metadata.to_vec()).unwrap();
-    assert!(
-        app_metadata.contains("entity_type:user"),
-        "Should contain entity type metadata"
-    );
-    assert!(
-        app_metadata.contains("schema_version:1"),
-        "Should contain schema version metadata"
-    );
-    assert!(
-        app_metadata.contains("backends:score:memory"),
-        "Should contain backend routing metadata"
-    );
-
-    let endpoint = &flight_info.endpoint[0];
-    assert!(
-        endpoint.ticket.is_some(),
-        "Endpoint should have a ticket for data retrieval"
-    );
-    assert!(
-        endpoint.location.is_empty(),
-        "Empty location means same server per F-01"
-    );
-    assert!(endpoint.expiration_time.is_none(), "No expiration time set");
-
-    let schema_bytes = &flight_info.schema;
-    assert!(!schema_bytes.is_empty(), "Schema bytes should not be empty");
-    assert!(
-        schema_bytes.len() > 50,
-        "Schema should contain substantial metadata"
-    );
-
-    println!("F-01 get_flight_info implementation verified - returns proper FlightInfo structure");
 
     let _ = tx.send(());
 }

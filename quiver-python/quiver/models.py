@@ -49,7 +49,15 @@ class FeatureRequest:
 
 @dataclass
 class RequestContext:
-    """Context information for feature requests."""
+    """Context information for feature requests.
+
+    Attributes:
+        request_id: Optional trace ID for this request. If provided, the server will
+            use this instead of generating a UUID. Useful for correlating metrics
+            and logs across multiple services. If not provided, server generates UUID.
+        caller: Optional identifier for the service/system making the request
+        environment: Optional environment identifier (e.g., "production", "staging")
+    """
 
     request_id: Optional[str] = None
     caller: Optional[str] = None

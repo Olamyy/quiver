@@ -1,6 +1,23 @@
-use crate::validation::ValidationConfig;
 use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
+
+use crate::validation::ValidationConfig;
+
+/// Downtime strategy for handling backend failures during fanout.
+///
+/// Determines behavior when a backend fails, times out, or is unavailable.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DowntimeStrategy {
+    /// Fail the entire request if any backend fails (default, safe).
+    #[default]
+    Fail,
+    /// Return available data from successful backends, skip failed ones (partial results).
+    ReturnAvailable,
+    /// Try fallback backend if primary fails/times out (requires fallback_source configured).
+    UseFallback,
+}
 
 /// Source path configuration - can be a string template or structured path
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -46,6 +63,8 @@ pub struct FilteredServerConfig {
     pub max_message_size_mb: Option<usize>,
     pub compression: Option<Compression>,
     pub timeout_seconds: Option<u64>,
+    pub fanout: FanoutServerConfig,
+    pub observability: ObservabilityConfig,
 }
 
 /// Adapter config with connection details removed
@@ -83,6 +102,8 @@ impl Config {
                 max_message_size_mb: self.server.max_message_size_mb,
                 compression: self.server.compression.clone(),
                 timeout_seconds: self.server.timeout_seconds,
+                fanout: self.server.fanout.clone(),
+                observability: self.server.observability.clone(),
             },
             registry: self.registry.clone(),
             adapters: self
@@ -128,6 +149,32 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
+
+        if self.server.observability.ttl_seconds == 0 {
+            errors.push("observability.ttl_seconds must be > 0".to_string());
+        }
+        if self.server.observability.max_entries == 0 {
+            errors.push("observability.max_entries must be > 0".to_string());
+        }
+
+        if self.server.fanout.enabled {
+            if self.server.fanout.max_concurrent_backends == 0 {
+                errors.push(
+                    "fanout.max_concurrent_backends must be >= 1 when fanout is enabled"
+                        .to_string(),
+                );
+            }
+
+            match self.server.fanout.partial_failure_strategy.as_str() {
+                "null_fill" | "error" | "forward_fill" => {}
+                strategy => {
+                    errors.push(format!(
+                        "fanout.partial_failure_strategy '{}' is invalid; must be 'null_fill', 'error', or 'forward_fill'",
+                        strategy
+                    ));
+                }
+            }
+        }
 
         for (adapter_name, adapter) in &self.adapters {
             match adapter {
@@ -188,6 +235,17 @@ impl Config {
         for view in views {
             if view.columns.is_empty() {
                 errors.push(format!("view '{}' has no columns", view.name));
+            }
+
+            if self.server.fanout.downtime_strategy == DowntimeStrategy::UseFallback {
+                for col in &view.columns {
+                    if col.fallback_source.is_none() {
+                        errors.push(format!(
+                            "view '{}' column '{}': downtime_strategy='use_fallback' requires fallback_source to be defined",
+                            view.name, col.name
+                        ));
+                    }
+                }
             }
 
             for col in &view.columns {
@@ -282,6 +340,90 @@ pub struct ServerConfig {
     pub access_log: Option<AccessLogConfig>,
     #[serde(default)]
     pub validation: ValidationConfig,
+    #[serde(default)]
+    pub fanout: FanoutServerConfig,
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub cache: crate::cache::CacheConfig,
+}
+
+/// Fanout execution configuration.
+///
+/// Controls multi-backend feature fetching behavior per RFC v0.3.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FanoutServerConfig {
+    /// Enable parallel multi-backend feature resolution.
+    #[serde(default = "default_fanout_enabled")]
+    pub enabled: bool,
+
+    /// Maximum number of backends to dispatch concurrently.
+    #[serde(default = "default_max_concurrent_backends")]
+    pub max_concurrent_backends: usize,
+
+    /// Strategy for handling partial failures when backends return fewer entities than requested.
+    #[serde(default = "default_partial_failure_strategy")]
+    pub partial_failure_strategy: String,
+
+    /// Strategy for handling backend downtime (timeout, error, unavailable).
+    #[serde(default)]
+    pub downtime_strategy: DowntimeStrategy,
+}
+
+/// Observability service configuration.
+///
+/// Controls metrics store TTL and capacity for the observability service.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ObservabilityConfig {
+    /// Time-to-live for stored metrics in seconds (default: 3600 = 1 hour).
+    /// Metrics older than this are automatically evicted from the store.
+    #[serde(default = "default_observability_ttl_seconds")]
+    pub ttl_seconds: u64,
+
+    /// Maximum number of metrics to store in memory (default: 10000).
+    /// When this limit is reached, oldest entries are evicted (LRU).
+    #[serde(default = "default_observability_max_entries")]
+    pub max_entries: u32,
+}
+
+impl Default for FanoutServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_concurrent_backends: 10,
+            partial_failure_strategy: "null_fill".to_string(),
+            downtime_strategy: DowntimeStrategy::Fail,
+        }
+    }
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            ttl_seconds: 3600,
+            max_entries: 10000,
+        }
+    }
+}
+
+fn default_fanout_enabled() -> bool {
+    true
+}
+
+fn default_max_concurrent_backends() -> usize {
+    10
+}
+
+fn default_partial_failure_strategy() -> String {
+    "null_fill".to_string()
+}
+
+fn default_observability_ttl_seconds() -> u64 {
+    3600
+}
+
+fn default_observability_max_entries() -> u32 {
+    10000
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -335,6 +477,9 @@ pub struct ColumnConfig {
     pub nullable: bool,
     pub source: String,
     pub source_path: Option<SourcePath>,
+    /// Fallback backend to use if primary backend fails/times out.
+    /// Required when downtime_strategy=use_fallback.
+    pub fallback_source: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -471,11 +616,9 @@ impl Config {
                 return Err(format!("Configuration file not found: {}", path).into());
             }
 
-            // Read file and substitute environment variables
             let config_str = std::fs::read_to_string(&path_buf)?;
             let substituted = substitute_env_vars(&config_str)?;
 
-            // Parse substituted config as YAML
             let config_value: serde_yaml::Value = serde_yaml::from_str(&substituted)?;
             builder = builder.add_source(
                 config::File::from_str(

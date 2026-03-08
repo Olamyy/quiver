@@ -31,4 +31,5 @@ message FeatureColumnSchema {
   string name = 1;
   string arrow_type = 2;
   bool nullable = 3;
+  string fallback_source = 4;
 }

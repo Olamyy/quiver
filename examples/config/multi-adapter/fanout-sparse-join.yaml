@@ -1,0 +1,62 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+  fanout:
+    enabled: true
+    max_concurrent_backends: 10
+    partial_failure_strategy: null_fill
+    downtime_strategy: "return_available"
+  observability:
+    # Metrics store TTL in seconds (default: 3600 = 1 hour)
+    # Metrics older than this are automatically evicted from memory
+    ttl_seconds: 3600
+    # Maximum number of metrics to store in memory (default: 10000)
+    # Oldest entries are evicted using LRU when this limit is reached
+    max_entries: 10000
+
+registry:
+  type: static
+  views:
+    # Multi-backend fanout view: features from both PostgreSQL and Redis
+    # Tests sparse join: each backend returns only what it has
+    - name: user_profile
+      entity_type: user
+      entity_key: entity
+      columns:
+        # From PostgreSQL: historical ecommerce data
+        - name: spend_30d
+          arrow_type: float64
+          source: postgres_historical
+          source_path: "ecommerce_data"
+        - name: purchase_count
+          arrow_type: int64
+          source: postgres_historical
+          source_path: "ecommerce_data"
+
+        # From Redis: real-time session data
+        - name: active_session_id
+          arrow_type: string
+          source: redis_realtime
+        - name: last_request_timestamp
+          arrow_type: timestamp
+          source: redis_realtime
+        - name: feature_not_in_redis
+          arrow_type: string
+          source: redis_realtime
+
+adapters:
+  postgres_historical:
+    type: postgres
+    connection_string: "postgresql://quiver:quiver_test@localhost:5432/quiver_test"
+    source_path: "ecommerce_data"
+    max_connections: 10
+    timeout_seconds: 25
+
+  redis_realtime:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "{entity}"
+    parameters:
+      mget_chunk_size: 5000
+    timeout_seconds: 10

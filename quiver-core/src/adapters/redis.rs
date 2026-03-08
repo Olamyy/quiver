@@ -1,7 +1,7 @@
 use crate::adapters::utils::{StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
 use crate::adapters::{
     AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
-    TemporalCapability,
+    OrderingGuarantee, TemporalCapability,
 };
 use crate::config::SourcePath;
 use crate::validation::{RequestValidation, ValidationConfig};
@@ -99,6 +99,7 @@ impl RedisAdapter {
             optimal_batch_size: Some(100),
             typical_latency_ms: 5,
             supports_parallel_requests: true,
+            ordering_guarantee: OrderingGuarantee::Unordered,
         };
 
         let mget_chunk_size = parameters
@@ -261,7 +262,6 @@ impl BackendAdapter for RedisAdapter {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],

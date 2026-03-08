@@ -26,8 +26,34 @@ from .exceptions import (
 from .models import FeatureRequest, RequestContext, FeatureViewInfo
 from .table import FeatureTable
 from .proto import serving_pb2, types_pb2
+from .observability import ObservabilityClient
 
 logger = logging.getLogger(__name__)
+
+
+class ResponseHeaderCapture(flight.ClientMiddleware):
+    """Captures gRPC response headers from Flight calls."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers: Dict[str, str] = {}
+
+    def received_headers(self, headers: Dict[str, str]) -> None:
+        """Store response headers when they arrive from the server."""
+        self.headers.update(headers)
+
+
+class ResponseHeaderCaptureFactory(flight.ClientMiddlewareFactory):
+    """Factory for creating ResponseHeaderCapture middleware instances."""
+
+    def __init__(self):
+        super().__init__()
+        self.last_middleware: Optional[ResponseHeaderCapture] = None
+
+    def start_call(self, info: Any) -> flight.ClientMiddleware:
+        """Create a new middleware instance for this call."""
+        self.last_middleware = ResponseHeaderCapture()
+        return self.last_middleware
 
 
 class Client:
@@ -58,6 +84,9 @@ class Client:
         compression: Optional[CompressionType] = None,
         default_null_strategy: NullStrategy = "fill_null",
         validate_connection: bool = False,
+        observability_host: Optional[str] = None,
+        observability_port: int = 8816,
+        observability_timeout: float = 5.0,
     ) -> None:
         self._host, self._port = self._normalize_address(address)
         self._timeout = timeout
@@ -65,10 +94,16 @@ class Client:
         self._compression = compression
         self._default_null_strategy = default_null_strategy
         self._closed = False
+        self._last_request_id: Optional[str] = None
+        self._last_from_cache: Optional[bool] = None
+        self._header_capture_factory = ResponseHeaderCaptureFactory()
 
         try:
-            location = flight.Location.for_grpc_tcp(self._host, self._port)
-            self._flight_client = flight.FlightClient(location)
+            middleware = [self._header_capture_factory]
+            self._flight_client = flight.connect(
+                f"grpc://{self._host}:{self._port}",
+                middleware=middleware,
+            )
         except Exception:  # noqa
             self._flight_client = None
 
@@ -76,6 +111,17 @@ class Client:
             raise QuiverConnectionError(
                 "Failed to create Flight client", f"{self._host}:{self._port}"
             )
+
+        obs_host = observability_host or self._host
+        try:
+            self._obs_client: Optional[ObservabilityClient] = ObservabilityClient(
+                host=obs_host,
+                port=observability_port,
+                timeout=observability_timeout,
+            )
+        except Exception as e:
+            logger.warning(f"Observability service not available: {str(e)}")
+            self._obs_client = None
 
         if validate_connection:
             self._validate_connection()
@@ -136,7 +182,8 @@ class Client:
             null_strategy: How to handle null/missing values
             include_timestamps: Whether to include feature timestamps
             include_freshness: Whether to include freshness metadata
-            context: Request context for tracing and debugging
+            context: Request context for tracing and debugging. Can include a
+                custom request_id for correlation with other services.
             timeout: Request timeout override
 
         Returns:
@@ -149,6 +196,18 @@ class Client:
             QuiverConnectionError: If connection fails
             QuiverServerError: If server error occurs
             QuiverTimeoutError: If request times out
+
+        Example:
+            Pass a custom request_id for cross-service tracing:
+                from quiver.models import RequestContext
+                ctx = RequestContext(request_id="my-trace-id-12345")
+                table = client.get_features(
+                    "user_profile",
+                    ["user:1000"],
+                    ["score"],
+                    context=ctx
+                )
+                # Server will use "my-trace-id-12345" instead of generating UUID
         """
         if self._closed:
             raise QuiverValidationError("Client is closed")
@@ -225,6 +284,45 @@ class Client:
 
                 start_time = time.time()
                 flight_reader = self._flight_client.do_get(ticket)
+
+                if self._header_capture_factory.last_middleware:
+                    headers = self._header_capture_factory.last_middleware.headers
+
+                    request_id_value = headers.get("x-quiver-request-id")
+                    if request_id_value:
+                        if isinstance(request_id_value, bytes):
+                            self._last_request_id = request_id_value.decode("utf-8")
+                        elif isinstance(request_id_value, str):
+                            self._last_request_id = request_id_value
+                        elif (
+                            isinstance(request_id_value, list)
+                            and len(request_id_value) > 0
+                        ):
+                            first_val = request_id_value[0]
+                            if isinstance(first_val, bytes):
+                                self._last_request_id = first_val.decode("utf-8")
+                            else:
+                                self._last_request_id = str(first_val)
+
+                    from_cache_value = headers.get("x-quiver-from-cache")
+                    if from_cache_value:
+                        cache_str = None
+                        if isinstance(from_cache_value, bytes):
+                            cache_str = from_cache_value.decode("utf-8")
+                        elif isinstance(from_cache_value, str):
+                            cache_str = from_cache_value
+                        elif (
+                            isinstance(from_cache_value, list)
+                            and len(from_cache_value) > 0
+                        ):
+                            first_val = from_cache_value[0]
+                            if isinstance(first_val, bytes):
+                                cache_str = first_val.decode("utf-8")
+                            else:
+                                cache_str = str(first_val)
+
+                        if cache_str:
+                            self._last_from_cache = cache_str.lower() == "true"
 
                 batches = []
                 schema = None
@@ -472,14 +570,101 @@ class Client:
         except Exception as e:
             raise QuiverServerError(f"Failed to list server actions: {str(e)}")
 
+    def get_last_request_id(self) -> Optional[str]:
+        """Get the request ID from the last feature request.
+
+        The request ID can be used to retrieve detailed metrics about the request
+        from the observability service via get_metrics().
+
+        Returns:
+            The request ID if available, None if no request has been made yet
+
+        Example:
+            table = client.get_features(...)
+            request_id = client.get_last_request_id()
+            if request_id:
+                metrics = client.get_metrics(request_id)
+                print(f"Total latency: {metrics['total_ms']:.2f}ms")
+        """
+        return self._last_request_id
+
+    def get_last_from_cache(self) -> Optional[bool]:
+        """Get the cache status from the last feature request.
+
+        Returns:
+            True if the last response was from cache, False if fresh, None if unknown
+        """
+        return self._last_from_cache
+
+    def get_metrics(self, request_id: Optional[str] = None) -> Dict[str, Any]:
+        """Retrieve detailed metrics for a feature request.
+
+        Queries the observability service for latency metrics collected during
+        feature resolution. Metrics include 11 instrumentation points covering
+        registry lookup, dispatch, backend execution, merge, and more.
+
+        Args:
+            request_id: The request ID to retrieve metrics for. If None, uses the
+                       request ID from the last feature request.
+
+        Returns:
+            Dictionary with latency metrics (all in milliseconds):
+            - registry_lookup_ms: Time to lookup feature view in registry
+            - cache_lookup_ms: Time to check metrics cache
+            - partition_ms: Time to partition features by backend
+            - dispatch_ms: Time to submit requests to backends
+            - backend_redis_ms: Redis backend latency (0.0 if not used)
+            - backend_delta_ms: Delta backend latency (0.0 if not used)
+            - backend_postgres_ms: PostgreSQL backend latency (0.0 if not used)
+            - backend_max_ms: Maximum latency across all backends
+            - alignment_ms: Time to align entity results
+            - merge_ms: Time to merge backend results via Arrow LEFT JOIN
+            - validation_ms: Time to validate merged results
+            - serialization_ms: Time to convert to Arrow IPC format
+            - total_ms: Total request latency
+            - critical_path_ms: Critical path latency
+            - feature_view: Feature view that was queried
+            - entity_count: Number of entities requested
+            - request_timestamp: When the request was processed
+
+        Raises:
+            QuiverValidationError: If client is closed or no request_id available
+            QuiverConnectionError: If observability service unavailable
+            QuiverServerError: If request_id not found (metrics expired or invalid)
+            QuiverTimeoutError: If observability service times out
+
+        Example:
+            table = client.get_features("user_features", ["user1", "user2"], ["score"])
+            metrics = client.get_metrics()  # Uses last request ID
+            print(f"Merge latency: {metrics['merge_ms']:.2f}ms")
+        """
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        if not self._obs_client:
+            raise QuiverConnectionError(
+                "Observability service not available",
+                "Check that observability service is running on port 8816",
+            )
+
+        effective_request_id = request_id or self._last_request_id
+        if not effective_request_id:
+            raise QuiverValidationError(
+                "No request_id available; either pass one explicitly or call get_features() first"
+            )
+
+        return self._obs_client.get_metrics(effective_request_id)
+
     def close(self) -> None:
         """Close connection to server."""
         if not self._closed:
             try:
                 if self._flight_client and hasattr(self._flight_client, "close"):
                     self._flight_client.close()
+                if self._obs_client:
+                    self._obs_client.close()
             except Exception as e:
-                logger.warning(f"Error closing Flight client: {e}")
+                logger.warning(f"Error closing client: {e}")
             finally:
                 self._closed = True
                 logger.info("Quiver client closed")

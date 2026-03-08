@@ -10,7 +10,9 @@ use std::time::Instant;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, info};
 
+use crate::cache::RequestCache;
 use crate::config::{AccessLogConfig, FilteredConfig};
+use crate::metrics::MetricsStore;
 use crate::proto::quiver::v1::FeatureRequest;
 use crate::resolver::Resolver;
 use arrow_flight::encode::FlightDataEncoderBuilder;
@@ -18,6 +20,7 @@ use chrono::DateTime;
 use futures::StreamExt;
 use prost::Message;
 use std::sync::Arc;
+use uuid::Uuid;
 
 struct AccessLogData<'a> {
     endpoint: &'a str,
@@ -33,6 +36,8 @@ pub struct QuiverFlightServer {
     resolver: Arc<Resolver>,
     access_log_config: Option<AccessLogConfig>,
     filtered_config: FilteredConfig,
+    metrics_store: Arc<MetricsStore>,
+    request_cache: Arc<RequestCache>,
 }
 
 impl QuiverFlightServer {
@@ -40,11 +45,15 @@ impl QuiverFlightServer {
         resolver: Arc<Resolver>,
         access_log_config: Option<AccessLogConfig>,
         filtered_config: FilteredConfig,
+        metrics_store: Arc<MetricsStore>,
+        request_cache: Arc<RequestCache>,
     ) -> Self {
         Self {
             resolver,
             access_log_config,
             filtered_config,
+            metrics_store,
+            request_cache,
         }
     }
 
@@ -302,6 +311,21 @@ impl FlightService for QuiverFlightServer {
             }
         };
 
+        let request_id = if let Some(ctx) = &feature_request.context {
+            if !ctx.request_id.is_empty() {
+                debug!("Using client-provided request_id: {}", ctx.request_id);
+                ctx.request_id.clone()
+            } else {
+                let gen_id = Uuid::new_v4().to_string();
+                debug!("Generated new request_id (context empty): {}", gen_id);
+                gen_id
+            }
+        } else {
+            let gen_id = Uuid::new_v4().to_string();
+            debug!("Generated new request_id (no context): {}", gen_id);
+            gen_id
+        };
+
         let feature_view = &feature_request.feature_view;
         let entity_count = feature_request.entities.len();
         let feature_count = feature_request.feature_names.len();
@@ -318,16 +342,81 @@ impl FlightService for QuiverFlightServer {
             .timeout_seconds
             .map(std::time::Duration::from_secs);
 
+        // Build cache key for request-level caching
+        use crate::cache::RequestCacheKey;
+        let entity_ids: Vec<String> = feature_request
+            .entities
+            .iter()
+            .map(|e| e.entity_id.clone())
+            .collect();
+        let entity_key = self
+            .resolver
+            .get_entity_key(feature_view)
+            .await
+            .unwrap_or_else(|_| "entity_id".to_string());
+
+        let cache_key = RequestCacheKey::with_temporal_rounding(
+            feature_view,
+            &entity_ids,
+            &feature_request.feature_names,
+            feature_request
+                .as_of
+                .map(|ts| ts.seconds * 1_000_000_000 + ts.nanos as i64),
+            &entity_key,
+            60, // 1-minute temporal rounding for historical queries
+        );
+
+        if let Some(cached) = self.request_cache.get(&cache_key).await {
+            debug!(
+                "Cache hit for request: view={}, entities={}",
+                feature_view, entity_count
+            );
+            let duration = start_time.elapsed();
+            self.log_request(AccessLogData {
+                endpoint: "do_get",
+                feature_view: Some(feature_view),
+                entity_count: Some(entity_count),
+                feature_count: Some(feature_count),
+                duration,
+                status: "cache_hit",
+                error: None,
+            });
+
+            let encoder_stream =
+                FlightDataEncoderBuilder::new().build(futures::stream::once(async move {
+                    Ok(cached.batch.as_ref().clone())
+                }));
+
+            let error_mapped = encoder_stream.map(|res| {
+                res.map_err(|e| Status::internal(format!("Flight encoding error: {}", e)))
+            });
+
+            let boxed_stream: Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>> =
+                Box::pin(error_mapped);
+
+            let mut response = Response::new(boxed_stream);
+            response.metadata_mut().insert(
+                "x-quiver-request-id",
+                request_id
+                    .parse()
+                    .map_err(|_| Status::internal("Invalid request_id"))?,
+            );
+            response.metadata_mut().insert(
+                "x-quiver-from-cache",
+                "true"
+                    .parse()
+                    .map_err(|_| Status::internal("Invalid header value"))?,
+            );
+
+            return Ok(response);
+        }
+
         let batch_result = self
             .resolver
             .resolve(
                 feature_view,
                 &feature_request.feature_names,
-                &feature_request
-                    .entities
-                    .iter()
-                    .map(|e| e.entity_id.clone())
-                    .collect::<Vec<_>>(),
+                &entity_ids,
                 feature_request
                     .as_of
                     .map(|ts| {
@@ -346,7 +435,7 @@ impl FlightService for QuiverFlightServer {
         let duration = start_time.elapsed();
 
         match batch_result {
-            Ok(batch) => {
+            Ok((batch, latencies)) => {
                 self.log_request(AccessLogData {
                     endpoint: "do_get",
                     feature_view: Some(feature_view),
@@ -357,17 +446,46 @@ impl FlightService for QuiverFlightServer {
                     error: None,
                 });
 
-                let stream = FlightDataEncoderBuilder::new()
-                    .build(futures::stream::once(async move { Ok(batch) }))
-                    .map(
-                        |res: Result<FlightData, arrow_flight::error::FlightError>| {
-                            res.map_err(|e| {
-                                Status::internal(format!("Flight encoding error: {}", e))
-                            })
-                        },
-                    );
+                // Store metrics for observability service
+                self.metrics_store
+                    .store(
+                        request_id.clone(),
+                        latencies.clone(),
+                        feature_view.clone(),
+                        entity_count as i32,
+                    )
+                    .await;
 
-                Ok(Response::new(Box::pin(stream)))
+                // Store result in request cache for performance optimization
+                self.request_cache
+                    .store(cache_key, batch.clone(), latencies)
+                    .await;
+
+                let encoder_stream = FlightDataEncoderBuilder::new()
+                    .build(futures::stream::once(async move { Ok(batch) }));
+
+                let error_mapped = encoder_stream.map(|res| {
+                    res.map_err(|e| Status::internal(format!("Flight encoding error: {}", e)))
+                });
+
+                let boxed_stream: Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>> =
+                    Box::pin(error_mapped);
+
+                let mut response = Response::new(boxed_stream);
+                response.metadata_mut().insert(
+                    "x-quiver-request-id",
+                    request_id
+                        .parse()
+                        .map_err(|_| Status::internal("Invalid request_id"))?,
+                );
+                response.metadata_mut().insert(
+                    "x-quiver-from-cache",
+                    "false"
+                        .parse()
+                        .map_err(|_| Status::internal("Invalid header value"))?,
+                );
+
+                Ok(response)
             }
             Err(e) => {
                 let error_msg = format!("Resolution failed: {}", e);
@@ -412,6 +530,7 @@ impl FlightService for QuiverFlightServer {
             .timeout_seconds
             .map(std::time::Duration::from_secs);
 
+        let metrics_store_clone = self.metrics_store.clone();
         let output_stream = async_stream::try_stream! {
             while let Some(data_res) = stream.next().await {
                 let data = data_res?;
@@ -430,7 +549,8 @@ impl FlightService for QuiverFlightServer {
                     DateTime::from_timestamp(ts.seconds, ts.nanos as u32).expect("Invalid timestamp")
                 });
 
-                let batch = resolver
+                let request_id = Uuid::new_v4().to_string();
+                let (batch, latencies) = resolver
                     .resolve(
                         &feature_request.feature_view,
                         &feature_request.feature_names,
@@ -440,6 +560,16 @@ impl FlightService for QuiverFlightServer {
                     )
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
+
+                // Store metrics for observability service
+                metrics_store_clone
+                    .store(
+                        request_id,
+                        latencies,
+                        feature_request.feature_view.clone(),
+                        entities.len() as i32,
+                    )
+                    .await;
 
                 let mut encoder = FlightDataEncoderBuilder::new()
                     .build(futures::stream::once(async move { Ok(batch) }));

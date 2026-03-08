@@ -7,6 +7,7 @@ edition = "2024"
 arrow = "58"
 arrow-flight = "58"
 tonic = { version = "0.14", features = ["gzip", "tls-ring", "zstd"] }
+tonic-prost = "0.14"
 prost = "0.14"
 prost-types = "0.14"
 tokio = { version = "1.37", features = ["full"] }
@@ -37,6 +38,8 @@ tokio-stream = "0.1"
 lru = "0.16"
 clickhouse = { version = "0.14", features = ["rustls-tls-webpki-roots"] }
 regex = "1.10"
+moka = { version = "0.12", features = ["future"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"

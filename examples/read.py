@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Quiver end-to-end client example.
 
@@ -29,6 +28,12 @@ def main():
         default="localhost:8815",
         help="Quiver server address (default: localhost:8815)",
     )
+    parser.add_argument(
+        "--rows",
+        type=int,
+        default=3,
+        help="Number of rows to fetch per feature view (default: 3)",
+    )
 
     args = parser.parse_args()
 
@@ -37,8 +42,9 @@ def main():
     print("=" * 70)
 
     try:
-        client = Client(args.server)
-        print(f"\n✓ Connected to Quiver server at {args.server}\n")
+        client = Client(args.server, observability_host="localhost", observability_port=8816)
+        print(f"\n✓ Connected to Quiver server at {args.server}")
+        print(f"✓ Observability service available at localhost:8816\n")
 
         print("=" * 70)
         print("SERVER CONFIGURATION")
@@ -83,22 +89,27 @@ def main():
 
                 feature_names = [col["name"] for col in columns]
 
-                # Find matching fixture scenario based on entity_type
                 scenario = None
                 for fixture_name, fixture_def in fixtures.items():
                     if fixture_def.get("entity_type") == entity_type:
                         scenario = fixture_def
                         break
 
+                sample_entities = []
                 if scenario:
-                    # Use entities from fixtures
-                    sample_entities = [record["entity"] for record in scenario["records"]]
-                else:
-                    # Fallback: generate based on entity_type
+                    fixture_entities = [record["entity"] for record in scenario["records"]]
+                    sample_entities.extend(fixture_entities[:args.rows])
+
+                # Generate additional entities if needed
+                if len(sample_entities) < args.rows:
+                    base_id = 1000 + len(fixture_entities) if scenario else 1000
+                    for i in range(len(sample_entities), args.rows):
+                        sample_entities.append(f"{entity_type}:{base_id + i - len(fixture_entities)}")
+
+                if not sample_entities:
                     sample_entities = [
-                        f"{entity_type}:1000",
-                        f"{entity_type}:1001",
-                        f"{entity_type}:1002",
+                        f"{entity_type}:{1000 + i}"
+                        for i in range(args.rows)
                     ]
 
                 print(f"\n  View: {view_name}")
@@ -111,10 +122,51 @@ def main():
                         feature_names,
                     )
 
-                    print(f"    Retrieved {len(result)} rows\n")
+                    print(f"    Retrieved {len(result)} rows")
+                    print()
 
+                    print("    Response Headers:")
+                    request_id = client.get_last_request_id()
+                    if request_id:
+                        print(f"      x-quiver-request-id: {request_id}")
+                    else:
+                        print(f"      x-quiver-request-id: NOT FOUND")
+
+                    from_cache = client.get_last_from_cache()
+                    if from_cache is not None:
+                        cache_status = "true (cached)" if from_cache else "false (fresh)"
+                        print(f"      x-quiver-from-cache: {cache_status}")
+                    else:
+                        print(f"      x-quiver-from-cache: NOT FOUND")
+
+                    print()
+                    print("    Observability Metrics:")
+                    if request_id:
+                        try:
+                            metrics = client.get_metrics(request_id)
+                            print(f"      Request ID: {request_id}")
+                            print(f"      Latency Breakdown (11 Instrumentation Points):")
+                            print(f"      Registry lookup:    {metrics['registry_lookup_ms']:7.2f}ms")
+                            print(f"      Cache lookup:       {metrics['cache_lookup_ms']:7.2f}ms")
+                            print(f"      Partition:          {metrics['partition_ms']:7.2f}ms")
+                            print(f"      Dispatch:           {metrics['dispatch_ms']:7.2f}ms")
+                            print(f"      Backend Redis:      {metrics['backend_redis_ms']:7.2f}ms")
+                            print(f"      Backend PostgreSQL: {metrics['backend_postgres_ms']:7.2f}ms")
+                            print(f"      Backend Max:        {metrics['backend_max_ms']:7.2f}ms")
+                            print(f"      Alignment:          {metrics['alignment_ms']:7.2f}ms")
+                            print(f"      Merge:              {metrics['merge_ms']:7.2f}ms")
+                            print(f"      Validation:         {metrics['validation_ms']:7.2f}ms")
+                            print(f"      Serialization:      {metrics['serialization_ms']:7.2f}ms")
+                            print(f"      " + "-" * 45)
+                            print(f"      TOTAL:              {metrics['total_ms']:7.2f}ms")
+                        except Exception as e:
+                            print(f"      Metrics unavailable: {type(e).__name__}: {e}")
+                    else:
+                        print(f"      Request ID not available")
+
+                    print()
+                    print("    Feature Data:")
                     df = result.to_pandas()
-                    print("    Data:")
                     for line in str(df).split("\n"):
                         print(f"      {line}")
 

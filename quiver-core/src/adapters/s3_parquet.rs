@@ -11,7 +11,7 @@
 
 use crate::adapters::{
     AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
-    TemporalCapability,
+    OrderingGuarantee, TemporalCapability,
 };
 use crate::config::{S3ParquetAdapterConfig, SourcePath};
 use crate::validation::ValidationConfig;
@@ -151,6 +151,7 @@ impl S3ParquetAdapter {
                 100
             },
             supports_parallel_requests: true,
+            ordering_guarantee: OrderingGuarantee::Unordered,
         };
 
         let cache_size = NonZeroUsize::new(128).unwrap();
@@ -527,6 +528,7 @@ mod tests {
                 optimal_batch_size: Some(10_000),
                 typical_latency_ms: 100,
                 supports_parallel_requests: true,
+                ordering_guarantee: OrderingGuarantee::Unordered,
             },
             validation_config: ValidationConfig::default(),
             storage_uri: "file:///data".to_string(),

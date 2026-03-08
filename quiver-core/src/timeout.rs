@@ -87,7 +87,6 @@ impl TimeoutBudget {
     /// Returns a reasonable fraction of operation timeout for connection acquisition.
     pub fn connection_timeout(&self) -> Option<Duration> {
         let remaining = self.remaining()?;
-        // Use 25% of remaining time or max 5 seconds for connection acquisition
         let fraction_timeout = remaining / 4;
         let max_connection_timeout = Duration::from_secs(5);
         Some(fraction_timeout.min(max_connection_timeout))

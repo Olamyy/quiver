@@ -6,8 +6,12 @@ use quiver_core::adapters::memory::MemoryAdapter;
 use quiver_core::adapters::postgres::PostgresAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::adapters::s3_parquet::S3ParquetAdapter;
+use quiver_core::cache::RequestCache;
 use quiver_core::config;
 use quiver_core::logging::ConfigLogger;
+use quiver_core::metrics::MetricsStore;
+use quiver_core::observability::ObservabilityServer;
+use quiver_core::proto::quiver::v1::observability_service_server::ObservabilityServiceServer;
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
 use quiver_core::server::QuiverFlightServer;
@@ -77,8 +81,9 @@ Loaded {} feature views and {} adapters",
 
     let registry = Arc::new(StaticRegistry::new());
 
-    let resolver = Arc::new(Resolver::new(
-        registry.clone() as Arc<dyn quiver_core::registry::Registry>
+    let resolver = Arc::new(Resolver::with_downtime_strategy(
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>,
+        cfg.server.fanout.downtime_strategy,
     ));
 
     let config::RegistryConfig::Static { views } = cfg.registry;
@@ -105,6 +110,7 @@ Loaded {} feature views and {} adapters",
                     name: c.name,
                     arrow_type: c.arrow_type,
                     nullable: c.nullable,
+                    fallback_source: c.fallback_source.unwrap_or_default(),
                 })
                 .collect(),
             backend_routing,
@@ -174,11 +180,8 @@ Loaded {} feature views and {} adapters",
                             Ok((name, Arc::new(adapter) as Arc<dyn BackendAdapter>))
                         }
                         config::AdapterConfig::S3Parquet(s3_cfg) => {
-                            let mut adapter = S3ParquetAdapter::new(
-                                &s3_cfg,
-                                Some(validation_config),
-                            )
-                            .await?;
+                            let mut adapter =
+                                S3ParquetAdapter::new(&s3_cfg, Some(validation_config)).await?;
 
                             adapter.initialize().await?;
 
@@ -227,7 +230,22 @@ Loaded {} feature views and {} adapters",
         resolver.register_adapter(name, adapter);
     }
 
-    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone(), filtered_config);
+    // Create shared metrics store with configured TTL and max entries
+    let metrics_store = Arc::new(MetricsStore::with_ttl(
+        cfg.server.observability.ttl_seconds,
+        cfg.server.observability.max_entries,
+    ));
+
+    // Create request cache for performance optimization
+    let request_cache = Arc::new(RequestCache::new(cfg.server.cache.clone()));
+
+    let server = QuiverFlightServer::new(
+        resolver,
+        cfg.server.access_log.clone(),
+        filtered_config,
+        metrics_store.clone(),
+        request_cache,
+    );
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
@@ -282,6 +300,25 @@ Loaded {} feature views and {} adapters",
             config::Compression::None => {}
         }
     }
+
+    // Create observability service
+    let observability_server = ObservabilityServer::new(metrics_store);
+    let observability_service = ObservabilityServiceServer::new(observability_server);
+
+    let observability_addr = format!("{}:8816", cfg.server.host).parse()?;
+
+    tracing::info!("Starting observability service on {}", observability_addr);
+
+    // Spawn observability service on separate port
+    tokio::spawn(async move {
+        if let Err(e) = Server::builder()
+            .add_service(observability_service)
+            .serve(observability_addr)
+            .await
+        {
+            tracing::error!("Observability service error: {}", e);
+        }
+    });
 
     server_builder
         .add_service(health_service)

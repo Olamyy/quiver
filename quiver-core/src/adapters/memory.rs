@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Duration;
 
-use super::{AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, TemporalCapability};
+use super::{
+    AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, OrderingGuarantee,
+    TemporalCapability,
+};
 use crate::adapters::utils::{ScalarValue, build_record_batch, validation};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
@@ -117,6 +120,7 @@ impl BackendAdapter for MemoryAdapter {
             optimal_batch_size: Some(1_000),
             typical_latency_ms: 1,
             supports_parallel_requests: true,
+            ordering_guarantee: OrderingGuarantee::OrderedByRequest,
         }
     }
 

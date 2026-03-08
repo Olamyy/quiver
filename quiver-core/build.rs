@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../proto/v1/serving.proto",
         "../proto/v1/metadata.proto",
         "../proto/v1/Flight.proto",
+        "../proto/v1/observability.proto",
     ];
 
     let proto_includes = &["../proto/v1"];
