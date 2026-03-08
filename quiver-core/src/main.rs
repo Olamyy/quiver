@@ -77,8 +77,9 @@ Loaded {} feature views and {} adapters",
 
     let registry = Arc::new(StaticRegistry::new());
 
-    let resolver = Arc::new(Resolver::new(
-        registry.clone() as Arc<dyn quiver_core::registry::Registry>
+    let resolver = Arc::new(Resolver::with_downtime_strategy(
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>,
+        cfg.server.fanout.downtime_strategy,
     ));
 
     let config::RegistryConfig::Static { views } = cfg.registry;
@@ -105,6 +106,7 @@ Loaded {} feature views and {} adapters",
                     name: c.name,
                     arrow_type: c.arrow_type,
                     nullable: c.nullable,
+                    fallback_source: c.fallback_source.unwrap_or_default(),
                 })
                 .collect(),
             backend_routing,

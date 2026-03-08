@@ -9,7 +9,7 @@
 #[cfg(test)]
 mod phase3_tests {
     use quiver_core::adapters::{AdapterCapabilities, OrderingGuarantee, TemporalCapability};
-    use quiver_core::config::{Config, FanoutServerConfig};
+    use quiver_core::config::Config;
     use quiver_core::fanout::metrics::{Backend as MetricsBackend, FanoutLatencies, Phase, Timer};
     use quiver_core::fanout::temporal::{TemporalCompatibility, TemporalRouter};
     use chrono::Duration;

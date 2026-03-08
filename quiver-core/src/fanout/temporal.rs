@@ -10,7 +10,6 @@
 /// - **Lazy fallback:** Try primary backend first, use fallback on timeout/empty result
 
 use chrono::{DateTime, Utc};
-use std::time::Duration;
 
 /// Temporal compatibility check result for a backend.
 ///
@@ -140,12 +139,13 @@ impl Default for TemporalRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration as ChronoDuration;
 
     #[test]
     fn test_check_compatibility_no_ttl() {
         let router = TemporalRouter::new();
         let now = Utc::now();
-        let as_of = now - Duration::from_secs(3600);
+        let as_of = now - ChronoDuration::seconds(3600);
 
         let result = router.check_compatibility(Some(as_of), now, None);
         assert_eq!(result, TemporalCompatibility::Safe);
@@ -155,7 +155,7 @@ mod tests {
     fn test_check_compatibility_safe_margin() {
         let router = TemporalRouter::new();
         let now = Utc::now();
-        let as_of = now - Duration::from_secs(600); // 10 minutes ago
+        let as_of = now - ChronoDuration::seconds(600); // 10 minutes ago
 
         let result = router.check_compatibility(Some(as_of), now, Some(3600)); // 1-hour TTL
         assert_eq!(result, TemporalCompatibility::Safe);
@@ -172,7 +172,7 @@ mod tests {
         // 59.5m = 3570s is exactly at boundary
         // For AtRisk, we need age > safe_ttl and age <= max_ttl
         // Let's use 59m 45s = 3585s
-        let as_of = now - Duration::from_secs(3585);
+        let as_of = now - ChronoDuration::seconds(3585);
 
         let result = router.check_compatibility(Some(as_of), now, Some(3600));
         assert_eq!(result, TemporalCompatibility::AtRisk);
@@ -182,7 +182,7 @@ mod tests {
     fn test_check_compatibility_unavailable() {
         let router = TemporalRouter::new();
         let now = Utc::now();
-        let as_of = now - Duration::from_secs(4000); // 66+ minutes ago
+        let as_of = now - ChronoDuration::seconds(4000); // 66+ minutes ago
 
         let result = router.check_compatibility(Some(as_of), now, Some(3600)); // 1-hour TTL
         assert_eq!(result, TemporalCompatibility::Unavailable);
@@ -222,7 +222,7 @@ mod tests {
     fn test_custom_clock_skew() {
         let router = TemporalRouter::with_clock_skew(60); // 60s margin
         let now = Utc::now();
-        let as_of = now - Duration::from_secs(31 * 60); // 31 min old
+        let as_of = now - ChronoDuration::seconds(31 * 60); // 31 min old
 
         // With 60s margin, safe_ttl = 3600 - 60 = 3540s (59 min)
         // 31 min (1860s) is within safe margin
@@ -235,7 +235,7 @@ mod tests {
         let router = TemporalRouter::new(); // 30s margin
         let now = Utc::now();
         // exactly at safe_ttl boundary: 3600 - 30 = 3570 (59m 30s)
-        let as_of = now - Duration::from_secs(3570);
+        let as_of = now - ChronoDuration::seconds(3570);
 
         let result = router.check_compatibility(Some(as_of), now, Some(3600));
         // age_seconds = 3570
@@ -248,7 +248,7 @@ mod tests {
     fn test_future_as_of() {
         let router = TemporalRouter::new();
         let now = Utc::now();
-        let as_of = now + Duration::from_secs(3600); // 1 hour in future
+        let as_of = now + ChronoDuration::seconds(3600); // 1 hour in future
 
         let result = router.check_compatibility(Some(as_of), now, Some(3600));
         // Future query treated as age_seconds = 0, which is always safe

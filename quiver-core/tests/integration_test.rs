@@ -55,8 +55,9 @@ async fn test_feature_serving_retrieval() {
     ]);
     let memory_adapter: Arc<dyn BackendAdapter> = Arc::new(memory_adapter);
 
-    let resolver = Arc::new(Resolver::new(
-        registry.clone() as Arc<dyn quiver_core::registry::Registry>
+    let resolver = Arc::new(Resolver::with_downtime_strategy(
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>,
+        quiver_core::config::DowntimeStrategy::Fail,
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
@@ -98,6 +99,7 @@ async fn test_feature_serving_retrieval() {
             name: "val".to_string(),
             arrow_type: "float64".to_string(),
             nullable: true,
+            fallback_source: String::new(),
         }],
         backend_routing,
         schema_version: 1,
@@ -143,8 +145,9 @@ async fn test_feature_serving_retrieval() {
 async fn test_get_flight_info() {
     let registry = Arc::new(StaticRegistry::new());
     let memory_adapter: Arc<dyn BackendAdapter> = Arc::new(MemoryAdapter::new());
-    let resolver = Arc::new(Resolver::new(
-        registry.clone() as Arc<dyn quiver_core::registry::Registry>
+    let resolver = Arc::new(Resolver::with_downtime_strategy(
+        registry.clone() as Arc<dyn quiver_core::registry::Registry>,
+        quiver_core::config::DowntimeStrategy::Fail,
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
@@ -157,11 +160,13 @@ async fn test_get_flight_info() {
                 name: "entity_id".to_string(),
                 arrow_type: "string".to_string(),
                 nullable: false,
+                fallback_source: String::new(),
             },
             quiver_core::proto::quiver::v1::FeatureColumnSchema {
                 name: "score".to_string(),
                 arrow_type: "float64".to_string(),
                 nullable: true,
+                fallback_source: String::new(),
             },
         ],
         backend_routing: {

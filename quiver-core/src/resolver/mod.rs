@@ -67,12 +67,13 @@ pub struct Resolver {
     column_configs: DashMap<String, HashMap<String, ColumnConfig>>,
     view_source_paths: DashMap<String, SourcePath>,
     fanout_config: FanoutConfig,
+    downtime_strategy: crate::config::DowntimeStrategy,
 }
 
 impl Resolver {
     /// Create a new Resolver with default fanout configuration.
     ///
-    /// Default config: fanout enabled, 10 concurrent backends, NullFill strategy.
+    /// Default config: fanout enabled, 10 concurrent backends, NullFill strategy, Fail downtime strategy.
     pub fn new(registry: Arc<dyn Registry>) -> Self {
         Self {
             registry,
@@ -84,6 +85,7 @@ impl Resolver {
                 max_concurrent_backends: 10,
                 partial_failure_strategy: PartialFailureStrategy::NullFill,
             },
+            downtime_strategy: crate::config::DowntimeStrategy::Fail,
         }
     }
 
@@ -95,6 +97,26 @@ impl Resolver {
             column_configs: DashMap::new(),
             view_source_paths: DashMap::new(),
             fanout_config,
+            downtime_strategy: crate::config::DowntimeStrategy::Fail,
+        }
+    }
+
+    /// Create a new Resolver with downtime strategy.
+    pub fn with_downtime_strategy(
+        registry: Arc<dyn Registry>,
+        downtime_strategy: crate::config::DowntimeStrategy,
+    ) -> Self {
+        Self {
+            registry,
+            adapters: DashMap::new(),
+            column_configs: DashMap::new(),
+            view_source_paths: DashMap::new(),
+            fanout_config: FanoutConfig {
+                enabled: true,
+                max_concurrent_backends: 10,
+                partial_failure_strategy: PartialFailureStrategy::NullFill,
+            },
+            downtime_strategy,
         }
     }
 
@@ -160,12 +182,53 @@ impl Resolver {
         Ok(groups)
     }
 
+    /// Build a fallback mapping for features: feature_name -> (primary_backend, fallback_backend).
+    ///
+    /// Used to implement the UseFallback downtime strategy. Maps each feature to its primary
+    /// and optional fallback backend for retry on timeout or error.
+    fn build_fallback_map(
+        &self,
+        feature_names: &[String],
+        metadata: &FeatureViewMetadata,
+    ) -> Result<HashMap<String, (String, Option<String>)>, ResolverError> {
+        let mut fallback_map: HashMap<String, (String, Option<String>)> = HashMap::new();
+
+        for feature_name in feature_names {
+            let primary_backend = metadata
+                .backend_routing
+                .get(feature_name)
+                .ok_or_else(|| {
+                    ResolverError::Internal(format!(
+                        "No backend routing for feature '{}'",
+                        feature_name
+                    ))
+                })?
+                .clone();
+
+            let fallback_backend = metadata
+                .columns
+                .iter()
+                .find(|col| &col.name == feature_name)
+                .and_then(|col| {
+                    if col.fallback_source.is_empty() {
+                        None
+                    } else {
+                        Some(col.fallback_source.clone())
+                    }
+                });
+
+            fallback_map.insert(feature_name.clone(), (primary_backend, fallback_backend));
+        }
+
+        Ok(fallback_map)
+    }
+
     /// Dispatch feature requests to multiple backends in parallel.
     ///
     /// Groups features by backend, then concurrently calls each backend's
     /// `get_with_resolutions()` method. Tracks execution latency and errors
-    /// for each backend independently. Does not fail the entire request if
-    /// individual backends fail—those are handled later during merge.
+    /// for each backend independently. Implements fallback retry logic when
+    /// downtime_strategy is UseFallback.
     ///
     /// # Arguments
     ///
@@ -175,6 +238,8 @@ impl Resolver {
     /// * `resolutions` - Map of feature_name -> FeatureResolution (type + source path)
     /// * `as_of` - Optional point-in-time timestamp for temporal queries
     /// * `timeout` - Optional timeout for the entire request
+    /// * `fallback_map` - Map of feature_name -> (primary_backend, fallback_backend)
+    /// * `downtime_strategy` - Downtime strategy from config
     ///
     /// # Returns
     ///
@@ -183,7 +248,7 @@ impl Resolver {
     /// - A RecordBatch with the fetched features (or error info)
     /// - Execution latency in milliseconds
     /// - Status ("success", "timeout", "error", etc.)
-    /// - Optional error message
+    /// - Optional fallback_used and error message
     ///
     /// # Errors
     ///
@@ -197,6 +262,8 @@ impl Resolver {
         resolutions: &HashMap<String, FeatureResolution>,
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
+        fallback_map: &HashMap<String, (String, Option<String>)>,
+        downtime_strategy: crate::config::DowntimeStrategy,
     ) -> Result<Vec<FanoutResult>, ResolverError> {
         if backend_groups.is_empty() {
             return Err(ResolverError::Internal(
@@ -217,6 +284,9 @@ impl Resolver {
                 let entity_key = entity_key.to_string();
                 let resolutions = resolutions.clone();
                 let entity_ids = entity_ids.to_vec();
+                let fallback_map_clone = fallback_map.clone();
+                let downtime_strategy = downtime_strategy;
+                let adapters = self.adapters.clone();
 
                 async move {
                     match adapter {
@@ -251,22 +321,86 @@ impl Resolver {
                                     fallback_used: None,
                                     error: None,
                                 },
-                                Err(e) => FanoutResult {
-                                    backend: backend_name_clone,
-                                    batch: RecordBatch::new_empty(Arc::new(
-                                        arrow::datatypes::Schema::new(
-                                            vec![] as Vec<arrow::datatypes::Field>
-                                        ),
-                                    )),
-                                    latency_ms: start.elapsed().as_millis() as u64,
-                                    status: if e.to_string().contains("timeout") {
-                                        "timeout".to_string()
-                                    } else {
-                                        "error".to_string()
-                                    },
-                                    fallback_used: None,
-                                    error: Some(e.to_string()),
-                                },
+                                Err(e) => {
+                                    let error_str = e.to_string();
+                                    let is_timeout = error_str.contains("timeout");
+                                    let status = if is_timeout { "timeout" } else { "error" };
+
+                                    // Attempt fallback if strategy is UseFallback
+                                    if downtime_strategy == crate::config::DowntimeStrategy::UseFallback {
+                                        let should_retry = features.iter().any(|feature| {
+                                            if let Some((primary, fallback_opt)) = fallback_map_clone.get(feature) {
+                                                primary == &backend_name_clone && fallback_opt.is_some()
+                                            } else {
+                                                false
+                                            }
+                                        });
+
+                                        if should_retry {
+                                            // Find the fallback backend for these features
+                                            if let Some(fallback_backend) = features.iter().find_map(|f| {
+                                                fallback_map_clone.get(f).and_then(|(_, fb)| fb.as_ref()).cloned()
+                                            }) {
+                                                if let Some(fallback_adapter) = adapters.get(&fallback_backend) {
+                                                    match fallback_adapter
+                                                        .get_sparse_with_resolutions(
+                                                            &entity_ids,
+                                                            &features,
+                                                            &entity_key,
+                                                            &resolutions,
+                                                            as_of,
+                                                            timeout,
+                                                        )
+                                                        .await
+                                                    {
+                                                        Ok(batch) => {
+                                                            return FanoutResult {
+                                                                backend: backend_name_clone,
+                                                                batch,
+                                                                latency_ms: start.elapsed().as_millis() as u64,
+                                                                status: "success".to_string(),
+                                                                fallback_used: Some(fallback_backend.to_string()),
+                                                                error: None,
+                                                            };
+                                                        }
+                                                        Err(fallback_err) => {
+                                                            return FanoutResult {
+                                                                backend: backend_name_clone,
+                                                                batch: RecordBatch::new_empty(Arc::new(
+                                                                    arrow::datatypes::Schema::new(
+                                                                        vec![] as Vec<arrow::datatypes::Field>,
+                                                                    ),
+                                                                )),
+                                                                latency_ms: start.elapsed().as_millis() as u64,
+                                                                status: "error".to_string(),
+                                                                fallback_used: Some(fallback_backend.to_string()),
+                                                                error: Some(format!(
+                                                                    "Primary: {}; Fallback: {}",
+                                                                    error_str,
+                                                                    fallback_err
+                                                                )),
+                                                            };
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // No fallback or fallback also failed
+                                    FanoutResult {
+                                        backend: backend_name_clone,
+                                        batch: RecordBatch::new_empty(Arc::new(
+                                            arrow::datatypes::Schema::new(
+                                                vec![] as Vec<arrow::datatypes::Field>,
+                                            ),
+                                        )),
+                                        latency_ms: start.elapsed().as_millis() as u64,
+                                        status: status.to_string(),
+                                        fallback_used: None,
+                                        error: Some(error_str),
+                                    }
+                                }
                             }
                         }
                     }
@@ -391,6 +525,10 @@ impl Resolver {
             }
             _ => {
                 let dispatch_timer = Timer::start();
+
+                // Build fallback mapping for UseFallback strategy
+                let fallback_map = self.build_fallback_map(feature_names, &metadata)?;
+
                 let fanout_results = self
                     .dispatch_to_backends(
                         backend_groups,
@@ -399,6 +537,8 @@ impl Resolver {
                         &resolutions,
                         as_of,
                         timeout,
+                        &fallback_map,
+                        self.downtime_strategy,
                     )
                     .await?;
                 metrics.record_phase(Phase::Dispatch, dispatch_timer.stop());
@@ -555,26 +695,31 @@ mod tests {
                     name: "feature_a".to_string(),
                     arrow_type: "float64".to_string(),
                     nullable: false,
+                    fallback_source: String::new(),
                 },
                 FeatureColumnSchema {
                     name: "feature_b".to_string(),
                     arrow_type: "int64".to_string(),
                     nullable: false,
+                    fallback_source: String::new(),
                 },
                 FeatureColumnSchema {
                     name: "feature_c".to_string(),
                     arrow_type: "bool".to_string(),
                     nullable: false,
+                    fallback_source: String::new(),
                 },
                 FeatureColumnSchema {
                     name: "feature_d".to_string(),
                     arrow_type: "string".to_string(),
                     nullable: true,
+                    fallback_source: String::new(),
                 },
                 FeatureColumnSchema {
                     name: "feature_e".to_string(),
                     arrow_type: "float64".to_string(),
                     nullable: true,
+                    fallback_source: String::new(),
                 },
             ],
             backend_routing,
@@ -680,6 +825,8 @@ mod tests {
                 &HashMap::new(),
                 None,
                 None,
+                &HashMap::new(),
+                crate::config::DowntimeStrategy::Fail,
             )
             .await;
 
@@ -711,6 +858,8 @@ mod tests {
                 &HashMap::new(),
                 None,
                 None,
+                &HashMap::new(),
+                crate::config::DowntimeStrategy::Fail,
             )
             .await;
 
