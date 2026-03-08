@@ -1,17 +1,13 @@
 use arrow::array::{Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use quiver_core::fanout::{detect_partial_failure, FanoutMerger, PartialFailureError};
+use quiver_core::fanout::{FanoutMerger, PartialFailureError, detect_partial_failure};
 use quiver_core::resolver::PartialFailureStrategy;
 use std::sync::Arc;
 
 fn make_backend_batch(entity_ids: &[&str], feature_name: &str, values: &[i64]) -> RecordBatch {
-    let entity_array = StringArray::from(
-        entity_ids
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-    );
+    let entity_array =
+        StringArray::from(entity_ids.iter().map(|s| s.to_string()).collect::<Vec<_>>());
     let value_array = Int64Array::from(values.to_vec());
 
     let schema = Arc::new(Schema::new(vec![
@@ -31,22 +27,21 @@ fn make_backend_batch(entity_ids: &[&str], feature_name: &str, values: &[i64]) -
 fn test_merge_two_backends_same_order() {
     let entity_ids = vec!["user:1000".to_string(), "user:1001".to_string()];
 
-    // Backend 1: spend_30d
     let backend1 = make_backend_batch(&["user:1000", "user:1001"], "spend_30d", &[100, 200]);
-
-    // Backend 2: is_premium
     let backend2 = make_backend_batch(&["user:1000", "user:1001"], "is_premium", &[1, 0]);
 
-    let result = FanoutMerger::merge(&entity_ids, &[backend1, backend2], &["spend_30d".to_string(), "is_premium".to_string()]);
+    let result = FanoutMerger::merge(
+        &entity_ids,
+        &[backend1, backend2],
+        &["spend_30d".to_string(), "is_premium".to_string()],
+    );
 
     assert!(result.is_ok());
     let merged = result.unwrap();
 
-    // Verify output has correct shape
     assert_eq!(merged.num_rows(), 2);
-    assert_eq!(merged.num_columns(), 3); // entity_id + spend_30d + is_premium
+    assert_eq!(merged.num_columns(), 3);
 
-    // Verify column names
     let schema = merged.schema();
     let names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert!(names.contains(&"entity_id"));
@@ -56,14 +51,12 @@ fn test_merge_two_backends_same_order() {
 
 #[test]
 fn test_merge_preserves_entity_order() {
-    // Request entities in specific order
     let entity_ids = vec![
         "user:3000".to_string(),
         "user:1000".to_string(),
         "user:2000".to_string(),
     ];
 
-    // Backend returns features in request order
     let backend1 = make_backend_batch(
         &["user:3000", "user:1000", "user:2000"],
         "score",
@@ -75,10 +68,8 @@ fn test_merge_preserves_entity_order() {
     assert!(result.is_ok());
     let merged = result.unwrap();
 
-    // Verify row order is preserved
     assert_eq!(merged.num_rows(), 3);
 
-    // Extract entity_id column and verify order
     let entity_col = merged
         .column(0)
         .as_any()
@@ -110,7 +101,6 @@ fn test_merge_multiple_features_from_multiple_backends() {
     )
     .unwrap();
 
-    // Backend 2: is_premium, loyalty_score
     let backend2 = RecordBatch::try_new(
         Arc::new(Schema::new(vec![
             Field::new("entity_id", DataType::Utf8, false),
@@ -140,9 +130,8 @@ fn test_merge_multiple_features_from_multiple_backends() {
     assert!(result.is_ok());
     let merged = result.unwrap();
 
-    // Verify all columns present
     assert_eq!(merged.num_rows(), 2);
-    assert_eq!(merged.num_columns(), 5); // entity_id + 4 features
+    assert_eq!(merged.num_columns(), 5);
 
     let schema = merged.schema();
     let names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
@@ -169,7 +158,6 @@ fn test_partial_failure_detection_row_count_mismatch() {
 
     let strategies = vec![("feature1".to_string(), PartialFailureStrategy::NullFill)];
 
-    // Expect 2 entities but batch has 1 row
     let result = detect_partial_failure(2, &batch, &strategies);
     assert!(result.is_err());
 }
@@ -250,6 +238,4 @@ fn test_merge_empty_entity_list() {
 
     // Should handle empty gracefully
     let _result = FanoutMerger::merge(&entity_ids, &backend_batches, &feature_names);
-    // Depending on implementation, this might succeed or error - both are acceptable
-    // for empty input
 }

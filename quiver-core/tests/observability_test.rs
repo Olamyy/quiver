@@ -8,11 +8,11 @@
 
 #[cfg(test)]
 mod phase3_tests {
+    use chrono::Duration;
     use quiver_core::adapters::{AdapterCapabilities, OrderingGuarantee, TemporalCapability};
     use quiver_core::config::Config;
     use quiver_core::fanout::metrics::{Backend as MetricsBackend, FanoutLatencies, Phase, Timer};
     use quiver_core::fanout::temporal::{TemporalCompatibility, TemporalRouter};
-    use chrono::Duration;
     use std::time::Duration as StdDuration;
 
     #[test]
@@ -68,9 +68,7 @@ mod phase3_tests {
 
         metrics.finalize();
 
-        // Total should sum all phases: 1+2+3+10+4+5 = 25.0
         assert_eq!(metrics.total_ms, 25.0);
-        // Critical path is also sum (all sequential): 25.0
         assert_eq!(metrics.critical_path_ms, 25.0);
     }
 
@@ -80,9 +78,8 @@ mod phase3_tests {
         std::thread::sleep(StdDuration::from_millis(10));
         let elapsed = timer.stop();
 
-        // Should be at least ~10ms, but allow for timing variance
         assert!(elapsed >= 8.0);
-        assert!(elapsed < 100.0); // Sanity check
+        assert!(elapsed < 100.0);
     }
 
     #[test]
@@ -149,7 +146,6 @@ mod phase3_tests {
 
     #[test]
     fn test_fanout_config_validation_enabled() {
-        // Create a minimal config with fanout enabled
         let config_yaml = r#"
 server:
   host: localhost
@@ -193,7 +189,10 @@ adapters: {}
         let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
         let result = config.validate();
 
-        assert!(result.is_ok(), "Config with fanout disabled should be valid");
+        assert!(
+            result.is_ok(),
+            "Config with fanout disabled should be valid"
+        );
     }
 
     #[test]
@@ -223,7 +222,9 @@ adapters: {}
         );
         let errors = result.unwrap_err();
         assert!(
-            errors.iter().any(|e| e.contains("partial_failure_strategy")),
+            errors
+                .iter()
+                .any(|e| e.contains("partial_failure_strategy")),
             "Error should mention invalid strategy"
         );
     }
@@ -255,9 +256,7 @@ adapters: {}
         );
         let errors = result.unwrap_err();
         assert!(
-            errors
-                .iter()
-                .any(|e| e.contains("max_concurrent_backends")),
+            errors.iter().any(|e| e.contains("max_concurrent_backends")),
             "Error should mention max_concurrent_backends"
         );
     }
@@ -311,8 +310,6 @@ adapters: {}
 
         let config: Config = serde_yaml::from_str(config_yaml).expect("valid config");
 
-        // Defaults should apply: When fanout is not in YAML, Default is used
-        // Check what values were deserialized
         assert!(
             config.server.fanout.enabled,
             "Fanout enabled should default to true, got: {}",
@@ -341,7 +338,10 @@ adapters: {}
         assert_eq!(at_risk_priority, Some(1), "AtRisk backends get priority 1");
 
         let unavailable_priority = router.backend_priority(TemporalCompatibility::Unavailable);
-        assert_eq!(unavailable_priority, None, "Unavailable backends are skipped");
+        assert_eq!(
+            unavailable_priority, None,
+            "Unavailable backends are skipped"
+        );
     }
 
     #[test]

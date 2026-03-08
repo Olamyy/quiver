@@ -307,10 +307,7 @@ Loaded {} feature views and {} adapters",
 
     let observability_addr = format!("{}:8816", cfg.server.host).parse()?;
 
-    tracing::info!(
-        "Starting observability service on {}",
-        observability_addr
-    );
+    tracing::info!("Starting observability service on {}", observability_addr);
 
     // Spawn observability service on separate port
     tokio::spawn(async move {

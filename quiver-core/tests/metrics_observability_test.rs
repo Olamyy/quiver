@@ -1,4 +1,4 @@
-use quiver_core::fanout::metrics::{FanoutLatencies, Phase, Backend as MetricsBackend};
+use quiver_core::fanout::metrics::{Backend as MetricsBackend, FanoutLatencies, Phase};
 use quiver_core::metrics::MetricsStore;
 use std::time::Duration;
 
@@ -73,12 +73,7 @@ async fn test_metrics_store_custom_ttl() {
     latencies.finalize();
 
     store
-        .store(
-            "ttl-test".to_string(),
-            latencies,
-            "view".to_string(),
-            1,
-        )
+        .store("ttl-test".to_string(), latencies, "view".to_string(), 1)
         .await;
 
     let retrieved = store.get("ttl-test").await;
@@ -167,5 +162,8 @@ fn test_metrics_store_default() {
     let store1 = MetricsStore::new();
     let store2 = MetricsStore::default();
 
-    assert_eq!(std::mem::size_of_val(&store1), std::mem::size_of_val(&store2));
+    assert_eq!(
+        std::mem::size_of_val(&store1),
+        std::mem::size_of_val(&store2)
+    );
 }

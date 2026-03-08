@@ -123,12 +123,28 @@ def main():
                     )
 
                     print(f"    Retrieved {len(result)} rows")
+                    print()
 
+                    print("    Response Headers:")
                     request_id = client.get_last_request_id()
+                    if request_id:
+                        print(f"      x-quiver-request-id: {request_id}")
+                    else:
+                        print(f"      x-quiver-request-id: NOT FOUND")
+
+                    from_cache = client.get_last_from_cache()
+                    if from_cache is not None:
+                        cache_status = "true (cached)" if from_cache else "false (fresh)"
+                        print(f"      x-quiver-from-cache: {cache_status}")
+                    else:
+                        print(f"      x-quiver-from-cache: NOT FOUND")
+
+                    print()
+                    print("    Observability Metrics:")
                     if request_id:
                         try:
                             metrics = client.get_metrics(request_id)
-                            print(f"    Request ID: {request_id}")
+                            print(f"      Request ID: {request_id}")
                             print(f"      Latency Breakdown (11 Instrumentation Points):")
                             print(f"      Registry lookup:    {metrics['registry_lookup_ms']:7.2f}ms")
                             print(f"      Cache lookup:       {metrics['cache_lookup_ms']:7.2f}ms")
@@ -144,13 +160,13 @@ def main():
                             print(f"      " + "-" * 45)
                             print(f"      TOTAL:              {metrics['total_ms']:7.2f}ms")
                         except Exception as e:
-                            print(f"    Metrics unavailable: {type(e).__name__}")
+                            print(f"      Metrics unavailable: {type(e).__name__}: {e}")
                     else:
-                        print(f"    Request ID not available")
+                        print(f"      Request ID not available")
 
                     print()
+                    print("    Feature Data:")
                     df = result.to_pandas()
-                    print("    Data:")
                     for line in str(df).split("\n"):
                         print(f"      {line}")
 

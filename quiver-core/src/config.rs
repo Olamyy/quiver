@@ -1,25 +1,22 @@
-use crate::validation::ValidationConfig;
 use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
+
+use crate::validation::ValidationConfig;
 
 /// Downtime strategy for handling backend failures during fanout.
 ///
 /// Determines behavior when a backend fails, times out, or is unavailable.
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DowntimeStrategy {
     /// Fail the entire request if any backend fails (default, safe).
+    #[default]
     Fail,
     /// Return available data from successful backends, skip failed ones (partial results).
     ReturnAvailable,
     /// Try fallback backend if primary fails/times out (requires fallback_source configured).
     UseFallback,
-}
-
-impl Default for DowntimeStrategy {
-    fn default() -> Self {
-        Self::Fail
-    }
 }
 
 /// Source path configuration - can be a string template or structured path
@@ -153,7 +150,6 @@ impl Config {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
 
-        // Validate observability configuration
         if self.server.observability.ttl_seconds == 0 {
             errors.push("observability.ttl_seconds must be > 0".to_string());
         }
@@ -161,18 +157,16 @@ impl Config {
             errors.push("observability.max_entries must be > 0".to_string());
         }
 
-        // Validate fanout configuration
         if self.server.fanout.enabled {
             if self.server.fanout.max_concurrent_backends == 0 {
                 errors.push(
-                    "fanout.max_concurrent_backends must be >= 1 when fanout is enabled".to_string(),
+                    "fanout.max_concurrent_backends must be >= 1 when fanout is enabled"
+                        .to_string(),
                 );
             }
 
             match self.server.fanout.partial_failure_strategy.as_str() {
-                "null_fill" | "error" | "forward_fill" => {
-                    // Valid strategies
-                }
+                "null_fill" | "error" | "forward_fill" => {}
                 strategy => {
                     errors.push(format!(
                         "fanout.partial_failure_strategy '{}' is invalid; must be 'null_fill', 'error', or 'forward_fill'",
@@ -243,7 +237,6 @@ impl Config {
                 errors.push(format!("view '{}' has no columns", view.name));
             }
 
-            // Check if use_fallback strategy requires fallback_source on all columns
             if self.server.fanout.downtime_strategy == DowntimeStrategy::UseFallback {
                 for col in &view.columns {
                     if col.fallback_source.is_none() {
@@ -623,11 +616,9 @@ impl Config {
                 return Err(format!("Configuration file not found: {}", path).into());
             }
 
-            // Read file and substitute environment variables
             let config_str = std::fs::read_to_string(&path_buf)?;
             let substituted = substitute_env_vars(&config_str)?;
 
-            // Parse substituted config as YAML
             let config_value: serde_yaml::Value = serde_yaml::from_str(&substituted)?;
             builder = builder.add_source(
                 config::File::from_str(

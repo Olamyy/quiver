@@ -3,15 +3,15 @@ use std::time::Instant;
 /// Fanout latency metrics tracking 11 instrumentation points.
 ///
 /// Captures latency at each phase of the fanout pipeline:
-/// 1. Registry lookup
-/// 2. Cache lookup
-/// 3. Partition (split hits/misses)
-/// 4. Dispatch (submit to backends)
-/// 5-7. Backend execution (parallel)
-/// 8. Alignment (entity position index)
-/// 9. Merge (assemble columns)
-/// 10. Validation (verify completeness)
-/// 11. Serialization (convert to Arrow IPC)
+/// - Phase 1: Registry lookup
+/// - Phase 2: Cache lookup
+/// - Phase 3: Partition (split hits/misses)
+/// - Phase 4: Dispatch (submit to backends)
+/// - Phases 5-7: Backend execution (parallel)
+/// - Phase 8: Alignment (entity position index)
+/// - Phase 9: Merge (assemble columns)
+/// - Phase 10: Validation (verify completeness)
+/// - Phase 11: Serialization (convert to Arrow IPC)
 #[derive(Debug, Clone)]
 pub struct FanoutLatencies {
     /// Phase 1: Registry lookup (find which backend has feature)
@@ -101,21 +101,16 @@ impl FanoutLatencies {
             Backend::Custom(_) => {} // Ignore custom backends for now
         }
 
-        // Update max backend latency
-        let backends = vec![
+        let backends = [
             self.backend_redis_ms,
             self.backend_delta_ms,
             self.backend_postgres_ms,
         ];
-        self.backend_max_ms = backends
-            .iter()
-            .filter_map(|&opt| opt)
-            .fold(0.0, f64::max);
+        self.backend_max_ms = backends.iter().filter_map(|&opt| opt).fold(0.0, f64::max);
     }
 
     /// Finalize metrics: calculate totals and critical path.
     pub fn finalize(&mut self) {
-        // Total is sum of all phases
         self.total_ms = self.registry_lookup_ms
             + self.cache_lookup_ms
             + self.partition_ms
@@ -126,8 +121,6 @@ impl FanoutLatencies {
             + self.validation_ms
             + self.serialization_ms;
 
-        // Critical path is max of sequential phases
-        // Sequential: registry → cache → partition → dispatch → backend(parallel) → alignment → merge → validation → serialization
         self.critical_path_ms = [
             self.registry_lookup_ms,
             self.cache_lookup_ms,

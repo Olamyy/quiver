@@ -11,8 +11,8 @@ use tracing::info;
 
 use super::utils::{ScalarValue, StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
 use super::{
-    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus, OrderingGuarantee,
-    TemporalCapability,
+    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
+    OrderingGuarantee, TemporalCapability,
 };
 use crate::validation::{RequestValidation, ValidationConfig};
 
@@ -731,7 +731,6 @@ impl BackendAdapter for PostgresAdapter {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],

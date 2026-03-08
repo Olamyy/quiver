@@ -36,7 +36,6 @@ pub fn detect_partial_failure(
     merged_batch: &RecordBatch,
     per_feature_strategies: &[(String, PartialFailureStrategy)],
 ) -> Result<(), PartialFailureError> {
-    // 1. Verify row count: no silent data loss
     let actual_row_count = merged_batch.num_rows();
     if actual_row_count != requested_entity_count {
         return Err(PartialFailureError::MissingEntities(format!(
@@ -45,9 +44,7 @@ pub fn detect_partial_failure(
         )));
     }
 
-    // 2. Validate null counts per feature against strategies
     for (feature_name, strategy) in per_feature_strategies {
-        // Find column index for this feature
         let col_idx = merged_batch
             .schema()
             .fields()
@@ -55,17 +52,13 @@ pub fn detect_partial_failure(
             .position(|f| f.name() == feature_name);
 
         if col_idx.is_none() {
-            // Feature column not in output (backend didn't return it) - will be caught by schema validation
             continue;
         }
 
         let col_idx = col_idx.unwrap();
         let column = merged_batch.column(col_idx);
-
-        // Count nulls in this column
         let null_count = column.null_count();
 
-        // Apply strategy validation
         match strategy {
             PartialFailureStrategy::Error if null_count > 0 => {
                 return Err(PartialFailureError::NullStrategyViolation(format!(
@@ -73,15 +66,8 @@ pub fn detect_partial_failure(
                     feature_name, null_count
                 )));
             }
-            PartialFailureStrategy::NullFill => {
-                // Nulls are allowed and expected for null_fill strategy
-            }
-            PartialFailureStrategy::ForwardFill if null_count > 0 => {
-                // ForwardFill implies nulls should have been filled from previous values
-                // If we still have nulls, it indicates we hit the boundary (no previous value to fill)
-                // This is acceptable per RFC v0.3 as long as first row is handled
-                // For now, we log but don't error - full forward_fill logic in Phase 3
-            }
+            PartialFailureStrategy::NullFill => {}
+            PartialFailureStrategy::ForwardFill if null_count > 0 => {}
             _ => {}
         }
     }
@@ -96,16 +82,9 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
 
-    fn make_test_batch_with_nulls(
-        entity_ids: &[&str],
-        values: &[Option<i64>],
-    ) -> RecordBatch {
-        let entity_array = StringArray::from(
-            entity_ids
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-        );
+    fn make_test_batch_with_nulls(entity_ids: &[&str], values: &[Option<i64>]) -> RecordBatch {
+        let entity_array =
+            StringArray::from(entity_ids.iter().map(|s| s.to_string()).collect::<Vec<_>>());
 
         let value_array = Int64Array::from(values.to_vec());
 
@@ -124,7 +103,8 @@ mod tests {
 
     #[test]
     fn test_detect_partial_failure_row_count_mismatch() {
-        let batch = make_test_batch_with_nulls(&["user:1000", "user:1001"], &[Some(100), Some(200)]);
+        let batch =
+            make_test_batch_with_nulls(&["user:1000", "user:1001"], &[Some(100), Some(200)]);
         let strategies = vec![("feature1".to_string(), PartialFailureStrategy::NullFill)];
 
         let result = detect_partial_failure(3, &batch, &strategies); // 3 requested but batch has 2
@@ -139,8 +119,7 @@ mod tests {
 
     #[test]
     fn test_detect_partial_failure_error_strategy_with_nulls() {
-        let batch =
-            make_test_batch_with_nulls(&["user:1000", "user:1001"], &[Some(100), None]);
+        let batch = make_test_batch_with_nulls(&["user:1000", "user:1001"], &[Some(100), None]);
         let strategies = vec![("feature1".to_string(), PartialFailureStrategy::Error)];
 
         let result = detect_partial_failure(2, &batch, &strategies);
@@ -155,8 +134,7 @@ mod tests {
 
     #[test]
     fn test_detect_partial_failure_null_fill_strategy_allows_nulls() {
-        let batch =
-            make_test_batch_with_nulls(&["user:1000", "user:1001"], &[Some(100), None]);
+        let batch = make_test_batch_with_nulls(&["user:1000", "user:1001"], &[Some(100), None]);
         let strategies = vec![("feature1".to_string(), PartialFailureStrategy::NullFill)];
 
         let result = detect_partial_failure(2, &batch, &strategies);

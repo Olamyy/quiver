@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Duration;
 
-use super::{AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, OrderingGuarantee, TemporalCapability};
+use super::{
+    AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, OrderingGuarantee,
+    TemporalCapability,
+};
 use crate::adapters::utils::{ScalarValue, build_record_batch, validation};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};

@@ -181,7 +181,7 @@ pub fn build_column(
             // Cast the ArrayData to have the timezone-aware type
             let array_data = array_no_tz.into_data();
             // Create a new ArrayData with same content but correct data type with timezone
-            #[allow(clippy::bind_instead_of_map)]
+            #[expect(clippy::bind_instead_of_map)]
             let null_bit_buffer = array_data.nulls().and_then(|nb| Some(nb.buffer().clone()));
             let buffers = array_data.buffers().to_vec();
             let child_data = array_data.child_data().to_vec();

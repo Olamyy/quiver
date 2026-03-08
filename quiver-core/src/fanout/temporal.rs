@@ -8,7 +8,6 @@
 ///   the data may or may not be available depending on clock synchronization
 /// - **Clock skew margin:** Default 30s margin to account for NTP drift
 /// - **Lazy fallback:** Try primary backend first, use fallback on timeout/empty result
-
 use chrono::{DateTime, Utc};
 
 /// Temporal compatibility check result for a backend.
@@ -82,19 +81,12 @@ impl TemporalRouter {
     ) -> TemporalCompatibility {
         let as_of = as_of.unwrap_or(now);
 
-        // If no TTL constraint, backend can serve (temporal or full history)
         let ttl_seconds = match ttl_seconds {
             None => return TemporalCompatibility::Safe,
             Some(t) => t,
         };
 
         let age_seconds = (now - as_of).num_seconds().max(0) as u32;
-
-        // TTL boundary: when is data guaranteed to be unavailable?
-        // With clock skew margin, adjust both boundaries:
-        // - Safe: age <= (ttl - margin) - guaranteed safe
-        // - AtRisk: (ttl - margin) < age <= ttl - might be available
-        // - Unavailable: age > ttl - definitely unavailable
         let safe_ttl = ttl_seconds.saturating_sub(self.clock_skew_margin_seconds);
         let max_ttl = ttl_seconds;
 
@@ -118,13 +110,10 @@ impl TemporalRouter {
     ///
     /// `Some(priority)` where priority 0 = try first, 1 = first fallback, etc.
     /// `None` if backend should not be used.
-    pub fn backend_priority(
-        &self,
-        compatibility: TemporalCompatibility,
-    ) -> Option<u32> {
+    pub fn backend_priority(&self, compatibility: TemporalCompatibility) -> Option<u32> {
         match compatibility {
-            TemporalCompatibility::Safe => Some(0),    // Primary
-            TemporalCompatibility::AtRisk => Some(1),  // Fallback
+            TemporalCompatibility::Safe => Some(0),     // Primary
+            TemporalCompatibility::AtRisk => Some(1),   // Fallback
             TemporalCompatibility::Unavailable => None, // Skip
         }
     }

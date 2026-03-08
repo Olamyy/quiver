@@ -129,11 +129,13 @@ impl FanoutMerger {
     /// # Returns
     ///
     /// Joined RecordBatch with all left rows + right columns (null-filled where no match)
-    fn left_join(left_table: &RecordBatch, right_table: &RecordBatch) -> Result<RecordBatch, MergeError> {
+    fn left_join(
+        left_table: &RecordBatch,
+        right_table: &RecordBatch,
+    ) -> Result<RecordBatch, MergeError> {
         use arrow::array::{Array, StringArray};
         use std::collections::HashMap;
 
-        // Extract entity_id columns (always first column)
         let left_entity_col = left_table
             .column(0)
             .as_any()
@@ -150,7 +152,6 @@ impl FanoutMerger {
                 MergeError::MergeFailed("Right entity_id column is not StringArray".to_string())
             })?;
 
-        // Build index: right table row index by entity_id
         let mut right_index: HashMap<String, usize> = HashMap::new();
         for i in 0..right_entity_col.len() {
             let entity_id: &str = right_entity_col.value(i);
@@ -164,12 +165,10 @@ impl FanoutMerger {
         let mut output_fields: Vec<Arc<arrow::datatypes::Field>> =
             left_table.schema().fields().iter().cloned().collect();
 
-        // Add all left columns
         for i in 0..left_table.num_columns() {
             output_columns.push(left_table.column(i).clone());
         }
 
-        // Add right columns (skip entity_id), null-filled where no match
         let right_schema = right_table.schema();
         for right_col_idx in 1..right_num_cols {
             let right_field = right_schema.field(right_col_idx).clone();
@@ -177,12 +176,11 @@ impl FanoutMerger {
 
             let right_col = right_table.column(right_col_idx);
 
-            // Build the column using type dispatch
             let new_col = Self::build_matched_column(
                 left_entity_col,
                 &right_index,
                 right_col.as_ref(),
-                &right_field.data_type(),
+                right_field.data_type(),
                 left_num_rows,
             )?;
             output_columns.push(new_col);
@@ -214,7 +212,9 @@ impl FanoutMerger {
                 let right_arr = right_col
                     .as_any()
                     .downcast_ref::<StringArray>()
-                    .ok_or_else(|| MergeError::TypeMismatch("String array downcast failed".to_string()))?;
+                    .ok_or_else(|| {
+                        MergeError::TypeMismatch("String array downcast failed".to_string())
+                    })?;
                 let mut builder = StringBuilder::with_capacity(left_num_rows, left_num_rows * 32);
                 for left_idx in 0..left_num_rows {
                     let entity_id = left_entity_col.value(left_idx);
@@ -231,10 +231,13 @@ impl FanoutMerger {
                 Ok(Arc::new(builder.finish()))
             }
             DataType::Int64 => {
-                let right_arr = right_col
-                    .as_any()
-                    .downcast_ref::<Int64Array>()
-                    .ok_or_else(|| MergeError::TypeMismatch("Int64 array downcast failed".to_string()))?;
+                let right_arr =
+                    right_col
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .ok_or_else(|| {
+                            MergeError::TypeMismatch("Int64 array downcast failed".to_string())
+                        })?;
                 let mut builder = Int64Builder::with_capacity(left_num_rows);
                 for left_idx in 0..left_num_rows {
                     let entity_id = left_entity_col.value(left_idx);
@@ -254,7 +257,9 @@ impl FanoutMerger {
                 let right_arr = right_col
                     .as_any()
                     .downcast_ref::<Float64Array>()
-                    .ok_or_else(|| MergeError::TypeMismatch("Float64 array downcast failed".to_string()))?;
+                    .ok_or_else(|| {
+                        MergeError::TypeMismatch("Float64 array downcast failed".to_string())
+                    })?;
                 let mut builder = Float64Builder::with_capacity(left_num_rows);
                 for left_idx in 0..left_num_rows {
                     let entity_id = left_entity_col.value(left_idx);
@@ -274,7 +279,9 @@ impl FanoutMerger {
                 let right_arr = right_col
                     .as_any()
                     .downcast_ref::<BooleanArray>()
-                    .ok_or_else(|| MergeError::TypeMismatch("Boolean array downcast failed".to_string()))?;
+                    .ok_or_else(|| {
+                        MergeError::TypeMismatch("Boolean array downcast failed".to_string())
+                    })?;
                 let mut builder = BooleanBuilder::with_capacity(left_num_rows);
                 for left_idx in 0..left_num_rows {
                     let entity_id = left_entity_col.value(left_idx);
@@ -294,7 +301,9 @@ impl FanoutMerger {
                 let right_arr = right_col
                     .as_any()
                     .downcast_ref::<TimestampNanosecondArray>()
-                    .ok_or_else(|| MergeError::TypeMismatch("Timestamp array downcast failed".to_string()))?;
+                    .ok_or_else(|| {
+                        MergeError::TypeMismatch("Timestamp array downcast failed".to_string())
+                    })?;
                 let mut builder = TimestampNanosecondBuilder::with_capacity(left_num_rows);
                 for left_idx in 0..left_num_rows {
                     let entity_id = left_entity_col.value(left_idx);
@@ -317,7 +326,12 @@ impl FanoutMerger {
                     arrow::datatypes::TimeUnit::Nanosecond,
                     tz.clone(),
                 );
-                array_data = array_data.clone().into_builder().data_type(ts_type).build().unwrap();
+                array_data = array_data
+                    .clone()
+                    .into_builder()
+                    .data_type(ts_type)
+                    .build()
+                    .unwrap();
                 let typed_array = TimestampNanosecondArray::from(array_data);
                 Ok(Arc::new(typed_array))
             }
@@ -343,13 +357,14 @@ impl FanoutMerger {
     ///
     /// RecordBatch with exactly `expected_row_count` rows (null-filled where needed)
     #[allow(dead_code)]
-    fn fill_nulls(batch: RecordBatch, expected_row_count: usize) -> Result<RecordBatch, MergeError> {
+    fn fill_nulls(
+        batch: RecordBatch,
+        expected_row_count: usize,
+    ) -> Result<RecordBatch, MergeError> {
         if batch.num_rows() == expected_row_count {
             return Ok(batch);
         }
 
-        // Placeholder: Null filling logic will go here in Task #7
-        // For now, return as-is
         Ok(batch)
     }
 
@@ -375,8 +390,6 @@ impl FanoutMerger {
         requested_entity_count: usize,
         _feature_names: &[String],
     ) -> Result<RecordBatch, MergeError> {
-        // Placeholder: Validation logic will go here in Task #7
-        // For now, just do basic checks
         if batch.num_rows() != requested_entity_count {
             return Err(MergeError::MergeFailed(format!(
                 "Row count mismatch: expected {}, got {}",
@@ -411,16 +424,9 @@ impl FanoutMerger {
         backend_results: &[RecordBatch],
         feature_names: &[String],
     ) -> Result<RecordBatch, MergeError> {
-        // Phase 1: Build request table
         let request_table = Self::build_request_table(entity_ids)?;
-
-        // Phase 2: Merge backend results via LEFT JOIN
         let merged = Self::merge_backend_results(request_table, backend_results, feature_names)?;
-
-        // Phase 3: Fill nulls for missing entities
         let filled = Self::fill_nulls(merged, entity_ids.len())?;
-
-        // Phase 4: Validate and finalize
         Self::finalize(filled, entity_ids.len(), feature_names)
     }
 }
@@ -432,12 +438,8 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
 
     fn make_test_batch(entity_ids: &[&str], values: &[i64]) -> RecordBatch {
-        let entity_array = StringArray::from(
-            entity_ids
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-        );
+        let entity_array =
+            StringArray::from(entity_ids.iter().map(|s| s.to_string()).collect::<Vec<_>>());
         let value_array = Int64Array::from(values.to_vec());
 
         let schema = Arc::new(Schema::new(vec![
@@ -455,7 +457,11 @@ mod tests {
 
     #[test]
     fn test_build_request_table() {
-        let entity_ids = vec!["user:1000".to_string(), "user:1001".to_string(), "user:1002".to_string()];
+        let entity_ids = vec![
+            "user:1000".to_string(),
+            "user:1001".to_string(),
+            "user:1002".to_string(),
+        ];
         let result = FanoutMerger::build_request_table(&entity_ids);
 
         assert!(result.is_ok());

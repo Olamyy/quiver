@@ -10,8 +10,8 @@
 //! - CurrentOnly temporal capability (Phase 1) / TimeTravel (Phase 2)
 
 use crate::adapters::{
-    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus, OrderingGuarantee,
-    TemporalCapability,
+    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
+    OrderingGuarantee, TemporalCapability,
 };
 use crate::config::{S3ParquetAdapterConfig, SourcePath};
 use crate::validation::ValidationConfig;

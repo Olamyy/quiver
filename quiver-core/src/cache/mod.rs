@@ -1,8 +1,8 @@
 use arrow::record_batch::RecordBatch;
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -120,13 +120,9 @@ impl RequestCache {
     /// Create a new request cache with the given configuration.
     pub fn new(config: CacheConfig) -> Self {
         let cache = if config.enabled {
-            Cache::builder()
-                .max_capacity(config.max_entries)
-                .build()
+            Cache::builder().max_capacity(config.max_entries).build()
         } else {
-            Cache::builder()
-                .max_capacity(0)
-                .build()
+            Cache::builder().max_capacity(0).build()
         };
 
         Self { cache, config }
@@ -210,7 +206,10 @@ mod tests {
             "entity_id",
         );
 
-        assert_eq!(key1, key2, "Cache keys should be equal regardless of input order");
+        assert_eq!(
+            key1, key2,
+            "Cache keys should be equal regardless of input order"
+        );
     }
 
     #[test]

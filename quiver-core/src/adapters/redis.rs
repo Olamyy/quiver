@@ -1,7 +1,7 @@
 use crate::adapters::utils::{StreamingRecordBatchBuilder, convert_raw_to_scalar, validation};
 use crate::adapters::{
-    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus, OrderingGuarantee,
-    TemporalCapability,
+    AdapterCapabilities, AdapterError, BackendAdapter, FeatureResolution, HealthStatus,
+    OrderingGuarantee, TemporalCapability,
 };
 use crate::config::SourcePath;
 use crate::validation::{RequestValidation, ValidationConfig};
@@ -262,7 +262,6 @@ impl BackendAdapter for RedisAdapter {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],

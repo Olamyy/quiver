@@ -31,6 +31,31 @@ from .observability import ObservabilityClient
 logger = logging.getLogger(__name__)
 
 
+class ResponseHeaderCapture(flight.ClientMiddleware):
+    """Captures gRPC response headers from Flight calls."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers: Dict[str, str] = {}
+
+    def received_headers(self, headers: Dict[str, str]) -> None:
+        """Store response headers when they arrive from the server."""
+        self.headers.update(headers)
+
+
+class ResponseHeaderCaptureFactory(flight.ClientMiddlewareFactory):
+    """Factory for creating ResponseHeaderCapture middleware instances."""
+
+    def __init__(self):
+        super().__init__()
+        self.last_middleware: Optional[ResponseHeaderCapture] = None
+
+    def start_call(self, info: Any) -> flight.ClientMiddleware:
+        """Create a new middleware instance for this call."""
+        self.last_middleware = ResponseHeaderCapture()
+        return self.last_middleware
+
+
 class Client:
     """Quiver client for feature serving with Arrow Flight integration.
 
@@ -70,10 +95,15 @@ class Client:
         self._default_null_strategy = default_null_strategy
         self._closed = False
         self._last_request_id: Optional[str] = None
+        self._last_from_cache: Optional[bool] = None
+        self._header_capture_factory = ResponseHeaderCaptureFactory()
 
         try:
-            location = flight.Location.for_grpc_tcp(self._host, self._port)
-            self._flight_client = flight.FlightClient(location)
+            middleware = [self._header_capture_factory]
+            self._flight_client = flight.connect(
+                f"grpc://{self._host}:{self._port}",
+                middleware=middleware,
+            )
         except Exception:  # noqa
             self._flight_client = None
 
@@ -152,7 +182,8 @@ class Client:
             null_strategy: How to handle null/missing values
             include_timestamps: Whether to include feature timestamps
             include_freshness: Whether to include freshness metadata
-            context: Request context for tracing and debugging
+            context: Request context for tracing and debugging. Can include a
+                custom request_id for correlation with other services.
             timeout: Request timeout override
 
         Returns:
@@ -165,6 +196,18 @@ class Client:
             QuiverConnectionError: If connection fails
             QuiverServerError: If server error occurs
             QuiverTimeoutError: If request times out
+
+        Example:
+            Pass a custom request_id for cross-service tracing:
+                from quiver.models import RequestContext
+                ctx = RequestContext(request_id="my-trace-id-12345")
+                table = client.get_features(
+                    "user_profile",
+                    ["user:1000"],
+                    ["score"],
+                    context=ctx
+                )
+                # Server will use "my-trace-id-12345" instead of generating UUID
         """
         if self._closed:
             raise QuiverValidationError("Client is closed")
@@ -242,6 +285,45 @@ class Client:
                 start_time = time.time()
                 flight_reader = self._flight_client.do_get(ticket)
 
+                if self._header_capture_factory.last_middleware:
+                    headers = self._header_capture_factory.last_middleware.headers
+
+                    request_id_value = headers.get("x-quiver-request-id")
+                    if request_id_value:
+                        if isinstance(request_id_value, bytes):
+                            self._last_request_id = request_id_value.decode("utf-8")
+                        elif isinstance(request_id_value, str):
+                            self._last_request_id = request_id_value
+                        elif (
+                            isinstance(request_id_value, list)
+                            and len(request_id_value) > 0
+                        ):
+                            first_val = request_id_value[0]
+                            if isinstance(first_val, bytes):
+                                self._last_request_id = first_val.decode("utf-8")
+                            else:
+                                self._last_request_id = str(first_val)
+
+                    from_cache_value = headers.get("x-quiver-from-cache")
+                    if from_cache_value:
+                        cache_str = None
+                        if isinstance(from_cache_value, bytes):
+                            cache_str = from_cache_value.decode("utf-8")
+                        elif isinstance(from_cache_value, str):
+                            cache_str = from_cache_value
+                        elif (
+                            isinstance(from_cache_value, list)
+                            and len(from_cache_value) > 0
+                        ):
+                            first_val = from_cache_value[0]
+                            if isinstance(first_val, bytes):
+                                cache_str = first_val.decode("utf-8")
+                            else:
+                                cache_str = str(first_val)
+
+                        if cache_str:
+                            self._last_from_cache = cache_str.lower() == "true"
+
                 batches = []
                 schema = None
 
@@ -257,13 +339,6 @@ class Client:
                     table = pa.Table.from_batches(batches, schema)  # noqa
                 else:
                     table = pa.Table.from_arrays([], schema or pa.schema([]))  # noqa
-
-                if "_quiver_request_id" in table.column_names:
-                    request_id_col = table.column("_quiver_request_id")
-                    if len(request_id_col) > 0:
-                        self._last_request_id = request_id_col[0].as_py()
-                    col_indices = [i for i, name in enumerate(table.column_names) if name != "_quiver_request_id"]
-                    table = table.select(col_indices)
 
                 logger.debug(
                     f"Retrieved {len(table)} rows in {time.time() - start_time:.2f}s"
@@ -512,6 +587,14 @@ class Client:
                 print(f"Total latency: {metrics['total_ms']:.2f}ms")
         """
         return self._last_request_id
+
+    def get_last_from_cache(self) -> Optional[bool]:
+        """Get the cache status from the last feature request.
+
+        Returns:
+            True if the last response was from cache, False if fresh, None if unknown
+        """
+        return self._last_from_cache
 
     def get_metrics(self, request_id: Optional[str] = None) -> Dict[str, Any]:
         """Retrieve detailed metrics for a feature request.

@@ -8,7 +8,10 @@ use clickhouse::Client;
 use tracing::info;
 
 use super::utils::ScalarValue;
-use super::{AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, OrderingGuarantee, TemporalCapability};
+use super::{
+    AdapterCapabilities, AdapterError, BackendAdapter, HealthStatus, OrderingGuarantee,
+    TemporalCapability,
+};
 use crate::validation::ValidationConfig;
 
 const BACKEND_NAME: &str = "clickhouse";
@@ -66,7 +69,6 @@ impl ClickHouseAdapter {
     ) -> Result<Self, AdapterError> {
         Self::validate_connection_string(connection_string)?;
 
-        // Extract database name from connection string
         let database_name = Self::extract_database_name(connection_string)
             .unwrap_or_else(|_| "quiver_test".to_string());
 
@@ -415,7 +417,6 @@ impl BackendAdapter for ClickHouseAdapter {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],

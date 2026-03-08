@@ -262,6 +262,7 @@ impl Resolver {
     ///
     /// Returns `ResolverError::Internal` if backend group is empty or adapter
     /// cannot be resolved.
+    #[expect(clippy::too_many_arguments)]
     async fn dispatch_to_backends(
         &self,
         backend_groups: HashMap<String, Vec<String>>,
@@ -293,7 +294,6 @@ impl Resolver {
                 let resolutions = resolutions.clone();
                 let entity_ids = entity_ids.to_vec();
                 let fallback_map_clone = fallback_map.clone();
-                let downtime_strategy = downtime_strategy;
                 let adapters = self.adapters.clone();
 
                 async move {
@@ -335,61 +335,73 @@ impl Resolver {
                                     let status = if is_timeout { "timeout" } else { "error" };
 
                                     // Attempt fallback if strategy is UseFallback
-                                    if downtime_strategy == crate::config::DowntimeStrategy::UseFallback {
+                                    if downtime_strategy
+                                        == crate::config::DowntimeStrategy::UseFallback
+                                    {
                                         let should_retry = features.iter().any(|feature| {
-                                            if let Some((primary, fallback_opt)) = fallback_map_clone.get(feature) {
-                                                primary == &backend_name_clone && fallback_opt.is_some()
+                                            if let Some((primary, fallback_opt)) =
+                                                fallback_map_clone.get(feature)
+                                            {
+                                                primary == &backend_name_clone
+                                                    && fallback_opt.is_some()
                                             } else {
                                                 false
                                             }
                                         });
 
-                                        if should_retry {
-                                            // Find the fallback backend for these features
-                                            if let Some(fallback_backend) = features.iter().find_map(|f| {
-                                                fallback_map_clone.get(f).and_then(|(_, fb)| fb.as_ref()).cloned()
-                                            }) {
-                                                if let Some(fallback_adapter) = adapters.get(&fallback_backend) {
-                                                    match fallback_adapter
-                                                        .get_sparse_with_resolutions(
-                                                            &entity_ids,
-                                                            &features,
-                                                            &entity_key,
-                                                            &resolutions,
-                                                            as_of,
-                                                            timeout,
-                                                        )
-                                                        .await
-                                                    {
-                                                        Ok(batch) => {
-                                                            return FanoutResult {
-                                                                backend: backend_name_clone,
-                                                                batch,
-                                                                latency_ms: start.elapsed().as_millis() as u64,
-                                                                status: "success".to_string(),
-                                                                fallback_used: Some(fallback_backend.to_string()),
-                                                                error: None,
-                                                            };
-                                                        }
-                                                        Err(fallback_err) => {
-                                                            return FanoutResult {
-                                                                backend: backend_name_clone,
-                                                                batch: RecordBatch::new_empty(Arc::new(
-                                                                    arrow::datatypes::Schema::new(
-                                                                        vec![] as Vec<arrow::datatypes::Field>,
-                                                                    ),
-                                                                )),
-                                                                latency_ms: start.elapsed().as_millis() as u64,
-                                                                status: "error".to_string(),
-                                                                fallback_used: Some(fallback_backend.to_string()),
-                                                                error: Some(format!(
-                                                                    "Primary: {}; Fallback: {}",
-                                                                    error_str,
-                                                                    fallback_err
-                                                                )),
-                                                            };
-                                                        }
-                                                    }
+                                        if should_retry
+                                            && let Some(fallback_backend) =
+                                                features.iter().find_map(|f| {
+                                                    fallback_map_clone
+                                                        .get(f)
+                                                        .and_then(|(_, fb)| fb.as_ref())
+                                                        .cloned()
+                                                })
+                                            && let Some(fallback_adapter) =
+                                                adapters.get(&fallback_backend)
+                                        {
+                                            match fallback_adapter
+                                                .get_sparse_with_resolutions(
+                                                    &entity_ids,
+                                                    &features,
+                                                    &entity_key,
+                                                    &resolutions,
+                                                    as_of,
+                                                    timeout,
+                                                )
+                                                .await
+                                            {
+                                                Ok(batch) => {
+                                                    return FanoutResult {
+                                                        backend: backend_name_clone,
+                                                        batch,
+                                                        latency_ms: start.elapsed().as_millis()
+                                                            as u64,
+                                                        status: "success".to_string(),
+                                                        fallback_used: Some(
+                                                            fallback_backend.to_string(),
+                                                        ),
+                                                        error: None,
+                                                    };
+                                                }
+                                                Err(fallback_err) => {
+                                                    return FanoutResult {
+                                                        backend: backend_name_clone,
+                                                        batch: RecordBatch::new_empty(Arc::new(
+                                                            arrow::datatypes::Schema::new(vec![]
+                                                                as Vec<arrow::datatypes::Field>),
+                                                        )),
+                                                        latency_ms: start.elapsed().as_millis()
+                                                            as u64,
+                                                        status: "error".to_string(),
+                                                        fallback_used: Some(
+                                                            fallback_backend.to_string(),
+                                                        ),
+                                                        error: Some(format!(
+                                                            "Primary: {}; Fallback: {}",
+                                                            error_str, fallback_err
+                                                        )),
+                                                    };
                                                 }
                                             }
                                         }
@@ -400,7 +412,7 @@ impl Resolver {
                                         backend: backend_name_clone,
                                         batch: RecordBatch::new_empty(Arc::new(
                                             arrow::datatypes::Schema::new(
-                                                vec![] as Vec<arrow::datatypes::Field>,
+                                                vec![] as Vec<arrow::datatypes::Field>
                                             ),
                                         )),
                                         latency_ms: start.elapsed().as_millis() as u64,
@@ -587,12 +599,9 @@ impl Resolver {
                 let backend_batches: Vec<_> =
                     fanout_results.iter().map(|r| r.batch.clone()).collect();
 
-                let merged = crate::fanout::FanoutMerger::merge(
-                    entity_ids,
-                    &backend_batches,
-                    feature_names,
-                )
-                .map_err(|e| ResolverError::Internal(format!("Merge failed: {}", e)))?;
+                let merged =
+                    crate::fanout::FanoutMerger::merge(entity_ids, &backend_batches, feature_names)
+                        .map_err(|e| ResolverError::Internal(format!("Merge failed: {}", e)))?;
                 metrics.record_phase(Phase::Merge, merge_timer.stop());
 
                 // Validate and detect partial failures per null strategy
@@ -613,8 +622,12 @@ impl Resolver {
                     })
                     .collect();
 
-                crate::fanout::detect_partial_failure(entity_ids.len(), &merged, &per_feature_strategies)
-                    .map_err(|e| ResolverError::Internal(format!("Partial failure detected: {}", e)))?;
+                crate::fanout::detect_partial_failure(
+                    entity_ids.len(),
+                    &merged,
+                    &per_feature_strategies,
+                )
+                .map_err(|e| ResolverError::Internal(format!("Partial failure detected: {}", e)))?;
                 metrics.record_phase(Phase::Validation, validation_timer.stop());
 
                 // Finalize metrics

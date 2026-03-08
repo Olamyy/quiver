@@ -90,7 +90,6 @@ pub trait BackendAdapter: Send + Sync {
     /// # Default Implementation
     /// The default implementation calls `get()`. Adapters should override this to take
     /// advantage of type checking and per-feature source paths.
-    #[allow(clippy::too_many_arguments)]
     async fn get_with_resolutions(
         &self,
         entity_ids: &[String],
@@ -125,7 +124,6 @@ pub trait BackendAdapter: Send + Sync {
     /// # Default Implementation
     /// Defaults to `get_with_resolutions()` which includes null-filling.
     /// Adapters should override this for efficient sparse retrieval.
-    #[allow(clippy::too_many_arguments)]
     async fn get_sparse_with_resolutions(
         &self,
         entity_ids: &[String],

@@ -17,7 +17,9 @@ impl ObservabilityServer {
 }
 
 #[tonic::async_trait]
-impl crate::proto::quiver::v1::observability_service_server::ObservabilityService for ObservabilityServer {
+impl crate::proto::quiver::v1::observability_service_server::ObservabilityService
+    for ObservabilityServer
+{
     async fn get_metrics(
         &self,
         request: Request<GetMetricsRequest>,
@@ -27,11 +29,9 @@ impl crate::proto::quiver::v1::observability_service_server::ObservabilityServic
 
         debug!("Retrieving metrics for request_id: {}", request_id);
 
-        let stored = self
-            .metrics_store
-            .get(request_id)
-            .await
-            .ok_or_else(|| Status::not_found(format!("Metrics not found for request_id: {}", request_id)))?;
+        let stored = self.metrics_store.get(request_id).await.ok_or_else(|| {
+            Status::not_found(format!("Metrics not found for request_id: {}", request_id))
+        })?;
 
         let metrics_proto = FanoutMetricsResponse {
             registry_lookup_ms: stored.latencies.registry_lookup_ms,
