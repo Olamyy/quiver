@@ -312,7 +312,7 @@ pub struct ServerConfig {
 /// Fanout execution configuration.
 ///
 /// Controls multi-backend feature fetching behavior per RFC v0.3.
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FanoutServerConfig {
     /// Enable parallel multi-backend feature resolution.
     #[serde(default = "default_fanout_enabled")]
@@ -325,6 +325,16 @@ pub struct FanoutServerConfig {
     /// Strategy for handling partial failures when backends return fewer entities than requested.
     #[serde(default = "default_partial_failure_strategy")]
     pub partial_failure_strategy: String,
+}
+
+impl Default for FanoutServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_concurrent_backends: 10,
+            partial_failure_strategy: "null_fill".to_string(),
+        }
+    }
 }
 
 fn default_fanout_enabled() -> bool {
