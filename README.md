@@ -98,9 +98,9 @@ Quiver returns feature data as Arrow `RecordBatch` objects via Arrow Flight.
 
 Columnar batches enable efficient vectorized processing and straightforward conversion into tensors.
 
-### Stale‑While‑Revalidate caching
+### Request-level caching
 
-Quiver includes an optional SWR cache that allows low‑latency serving while asynchronously refreshing stale values.
+Quiver includes optional caching with configurable TTL policies for repeated feature requests.
 
 ### Serving‑time observability
 
@@ -179,6 +179,18 @@ Coordinates parallel retrieval from backend adapters and merges results into a s
 
 ---
 
+# Supported Adapters
+
+- Memory (in-memory)
+- Redis
+- PostgreSQL
+- Parquet / S3
+- ClickHouse*
+
+*Available with extended configuration
+
+---
+
 # Feature Request Model
 
 A typical request includes:
@@ -201,14 +213,11 @@ The resolver determines which backends contain the requested features and execut
 
 # Observability
 
-Quiver can observe feature traffic directly and produce useful metrics such as:
+Quiver collects 11 instrumentation points during feature resolution and exposes them via:
 
-* feature null rates
-* value distributions
-* request latency
-* backend latency
-
-These metrics can help detect issues like feature drift or missing data that might otherwise go unnoticed until model performance degrades.
+* Response headers: `x-quiver-request-id`, `x-quiver-from-cache`
+* Observability service: `localhost:8816`
+* Python client: `client.get_metrics(request_id)`
 
 ---
 
@@ -303,12 +312,13 @@ See the [examples directory](examples/) for complete configuration examples and 
 
 # Python Client
 
-Quiver includes a Python client. [See Python Client Documentation](quiver-python/README.md)
+Quiver includes a Python client with support for exporting to pandas, NumPy, PyTorch, and TensorFlow.
 
+[See Python Client Documentation](quiver-python/README.md)
 
-Example usage:
+Example:
 
-```
+```python
 import quiver
 
 client = quiver.Client("localhost:8815")
@@ -320,8 +330,6 @@ features = client.get_features(
 )
 
 print(features.to_pandas())
-
-client.close()
 ```
 
 ---
@@ -360,13 +368,12 @@ make run
 
 # Roadmap
 
-| Version | Milestone | Description | Goals | Status |
-|---------|-----------|-------------|-------|----|
-| **v0.1** | Foundations | Core feature serving prototype | Arrow Flight server, basic resolver, in‑memory adapter, static registry | [ ] |
-| **v0.2** | Multi‑backend execution | Introduce real fan‑out capabilities | Redis adapter, Parquet / object storage adapter, parallel execution engine, result merging | [ ] |
-| **v0.3** | Caching and freshness | Introduce serving‑time performance features | Stale‑while‑revalidate cache, configurable TTL policies, cache metrics | [ ]   |
-| **v0.4** | Observability | Expose metrics for feature traffic | Feature distribution metrics, latency breakdowns, OpenTelemetry support | [ ] |
-| **v0.5** | Registry integrations | Integrate with external feature registries | Feast registry integration, schema versioning | [ ]   |
-| **v0.6** | Streaming adapters | Add real‑time feature sources | Kafka adapter, streaming feature ingestion | [ ]   |
-| **v1.0** | Production readiness | Stabilize APIs and deployment model | Horizontal scaling, multi‑tenant support, performance benchmarks | [ ]   |
+| Version | Milestone | Status |
+|---------|-----------|--------|
+| **v0.1** | Foundations | Complete |
+| **v0.2** | Multi‑backend execution | Complete |
+| **v0.3** | Caching and freshness | Complete |
+| **v0.4** | Observability | Complete |
+| **v0.5** | Request tracing | Complete |
+| **v0.6** | Benchmarks | In progress |
 
