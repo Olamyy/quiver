@@ -6,6 +6,7 @@ server:
     enabled: true
     max_concurrent_backends: 10
     partial_failure_strategy: null_fill
+    downtime_strategy: fail
 
 registry:
   type: static
