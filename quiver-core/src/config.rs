@@ -46,6 +46,7 @@ pub struct FilteredServerConfig {
     pub max_message_size_mb: Option<usize>,
     pub compression: Option<Compression>,
     pub timeout_seconds: Option<u64>,
+    pub fanout: FanoutServerConfig,
 }
 
 /// Adapter config with connection details removed
@@ -83,6 +84,7 @@ impl Config {
                 max_message_size_mb: self.server.max_message_size_mb,
                 compression: self.server.compression.clone(),
                 timeout_seconds: self.server.timeout_seconds,
+                fanout: self.server.fanout.clone(),
             },
             registry: self.registry.clone(),
             adapters: self
@@ -128,6 +130,27 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
+
+        // Validate fanout configuration
+        if self.server.fanout.enabled {
+            if self.server.fanout.max_concurrent_backends == 0 {
+                errors.push(
+                    "fanout.max_concurrent_backends must be >= 1 when fanout is enabled".to_string(),
+                );
+            }
+
+            match self.server.fanout.partial_failure_strategy.as_str() {
+                "null_fill" | "error" | "forward_fill" => {
+                    // Valid strategies
+                }
+                strategy => {
+                    errors.push(format!(
+                        "fanout.partial_failure_strategy '{}' is invalid; must be 'null_fill', 'error', or 'forward_fill'",
+                        strategy
+                    ));
+                }
+            }
+        }
 
         for (adapter_name, adapter) in &self.adapters {
             match adapter {
@@ -282,6 +305,38 @@ pub struct ServerConfig {
     pub access_log: Option<AccessLogConfig>,
     #[serde(default)]
     pub validation: ValidationConfig,
+    #[serde(default)]
+    pub fanout: FanoutServerConfig,
+}
+
+/// Fanout execution configuration.
+///
+/// Controls multi-backend feature fetching behavior per RFC v0.3.
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct FanoutServerConfig {
+    /// Enable parallel multi-backend feature resolution.
+    #[serde(default = "default_fanout_enabled")]
+    pub enabled: bool,
+
+    /// Maximum number of backends to dispatch concurrently.
+    #[serde(default = "default_max_concurrent_backends")]
+    pub max_concurrent_backends: usize,
+
+    /// Strategy for handling partial failures when backends return fewer entities than requested.
+    #[serde(default = "default_partial_failure_strategy")]
+    pub partial_failure_strategy: String,
+}
+
+fn default_fanout_enabled() -> bool {
+    true
+}
+
+fn default_max_concurrent_backends() -> usize {
+    10
+}
+
+fn default_partial_failure_strategy() -> String {
+    "null_fill".to_string()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

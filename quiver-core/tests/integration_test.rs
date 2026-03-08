@@ -26,6 +26,7 @@ fn create_test_filtered_config() -> FilteredConfig {
             max_message_size_mb: None,
             compression: None,
             timeout_seconds: None,
+            fanout: Default::default(),
         },
         registry: RegistryConfig::Static { views: vec![] },
         adapters: {

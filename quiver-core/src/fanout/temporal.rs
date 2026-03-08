@@ -9,8 +9,8 @@
 /// - **Clock skew margin:** Default 30s margin to account for NTP drift
 /// - **Lazy fallback:** Try primary backend first, use fallback on timeout/empty result
 
-use std::time::Duration;
 use chrono::{DateTime, Utc};
+use std::time::Duration;
 
 /// Temporal compatibility check result for a backend.
 ///
