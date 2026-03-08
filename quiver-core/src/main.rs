@@ -6,6 +6,7 @@ use quiver_core::adapters::memory::MemoryAdapter;
 use quiver_core::adapters::postgres::PostgresAdapter;
 use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::adapters::s3_parquet::S3ParquetAdapter;
+use quiver_core::cache::RequestCache;
 use quiver_core::config;
 use quiver_core::logging::ConfigLogger;
 use quiver_core::metrics::MetricsStore;
@@ -235,11 +236,15 @@ Loaded {} feature views and {} adapters",
         cfg.server.observability.max_entries,
     ));
 
+    // Create request cache for performance optimization
+    let request_cache = Arc::new(RequestCache::new(cfg.server.cache.clone()));
+
     let server = QuiverFlightServer::new(
         resolver,
         cfg.server.access_log.clone(),
         filtered_config,
         metrics_store.clone(),
+        request_cache,
     );
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();

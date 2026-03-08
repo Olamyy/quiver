@@ -10,6 +10,7 @@ use std::time::Instant;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, info};
 
+use crate::cache::RequestCache;
 use crate::config::{AccessLogConfig, FilteredConfig};
 use crate::metrics::MetricsStore;
 use crate::proto::quiver::v1::FeatureRequest;
@@ -36,6 +37,7 @@ pub struct QuiverFlightServer {
     access_log_config: Option<AccessLogConfig>,
     filtered_config: FilteredConfig,
     metrics_store: Arc<MetricsStore>,
+    request_cache: Arc<RequestCache>,
 }
 
 impl QuiverFlightServer {
@@ -44,12 +46,14 @@ impl QuiverFlightServer {
         access_log_config: Option<AccessLogConfig>,
         filtered_config: FilteredConfig,
         metrics_store: Arc<MetricsStore>,
+        request_cache: Arc<RequestCache>,
     ) -> Self {
         Self {
             resolver,
             access_log_config,
             filtered_config,
             metrics_store,
+            request_cache,
         }
     }
 
@@ -324,16 +328,61 @@ impl FlightService for QuiverFlightServer {
             .timeout_seconds
             .map(std::time::Duration::from_secs);
 
+        // Build cache key for request-level caching
+        use crate::cache::RequestCacheKey;
+        let entity_ids: Vec<String> = feature_request
+            .entities
+            .iter()
+            .map(|e| e.entity_id.clone())
+            .collect();
+        let entity_key = self
+            .resolver
+            .get_entity_key(feature_view)
+            .await
+            .unwrap_or_else(|_| "entity_id".to_string());
+
+        let cache_key = RequestCacheKey::with_temporal_rounding(
+            feature_view,
+            &entity_ids,
+            &feature_request.feature_names,
+            feature_request.as_of.map(|ts| ts.seconds * 1_000_000_000 + ts.nanos as i64),
+            &entity_key,
+            60, // 1-minute temporal rounding for historical queries
+        );
+
+        // Check cache first
+        if let Some(cached) = self.request_cache.get(&cache_key).await {
+            debug!("Cache hit for request: view={}, entities={}", feature_view, entity_count);
+            let duration = start_time.elapsed();
+            self.log_request(AccessLogData {
+                endpoint: "do_get",
+                feature_view: Some(feature_view),
+                entity_count: Some(entity_count),
+                feature_count: Some(feature_count),
+                duration,
+                status: "cache_hit",
+                error: None,
+            });
+
+            let encoder_stream = FlightDataEncoderBuilder::new()
+                .build(futures::stream::once(async move { Ok(cached.batch.as_ref().clone()) }));
+
+            let error_mapped = encoder_stream.map(|res| {
+                res.map_err(|e| Status::internal(format!("Flight encoding error: {}", e)))
+            });
+
+            let boxed_stream: Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>> =
+                Box::pin(error_mapped);
+
+            return Ok(Response::new(boxed_stream));
+        }
+
         let batch_result = self
             .resolver
             .resolve(
                 feature_view,
                 &feature_request.feature_names,
-                &feature_request
-                    .entities
-                    .iter()
-                    .map(|e| e.entity_id.clone())
-                    .collect::<Vec<_>>(),
+                &entity_ids,
                 feature_request
                     .as_of
                     .map(|ts| {
@@ -367,10 +416,15 @@ impl FlightService for QuiverFlightServer {
                 self.metrics_store
                     .store(
                         request_id.clone(),
-                        latencies,
+                        latencies.clone(),
                         feature_view.clone(),
                         entity_count as i32,
                     )
+                    .await;
+
+                // Store result in request cache for performance optimization
+                self.request_cache
+                    .store(cache_key, batch.clone(), latencies)
                     .await;
 
                 // Add request_id column to batch for client correlation

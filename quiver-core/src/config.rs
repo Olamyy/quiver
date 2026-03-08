@@ -351,6 +351,8 @@ pub struct ServerConfig {
     pub fanout: FanoutServerConfig,
     #[serde(default)]
     pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub cache: crate::cache::CacheConfig,
 }
 
 /// Fanout execution configuration.

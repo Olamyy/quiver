@@ -258,12 +258,10 @@ class Client:
                 else:
                     table = pa.Table.from_arrays([], schema or pa.schema([]))  # noqa
 
-                # Extract request_id from the internal column if present
                 if "_quiver_request_id" in table.column_names:
                     request_id_col = table.column("_quiver_request_id")
                     if len(request_id_col) > 0:
                         self._last_request_id = request_id_col[0].as_py()
-                    # Remove the internal column from the returned table
                     col_indices = [i for i, name in enumerate(table.column_names) if name != "_quiver_request_id"]
                     table = table.select(col_indices)
 

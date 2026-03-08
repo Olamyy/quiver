@@ -140,6 +140,14 @@ impl Resolver {
         }
     }
 
+    /// Get the entity key for a feature view.
+    pub async fn get_entity_key(&self, view_name: &str) -> Result<String, ResolverError> {
+        match self.registry.get_view(view_name).await {
+            Ok(view_info) => Ok(view_info.entity_key),
+            Err(_) => Ok("entity_id".to_string()), // Fallback default
+        }
+    }
+
     /// Get the fanout configuration.
     pub fn fanout_config(&self) -> &FanoutConfig {
         &self.fanout_config

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Quiver end-to-end client example.
 
@@ -28,6 +27,12 @@ def main():
         "--server",
         default="localhost:8815",
         help="Quiver server address (default: localhost:8815)",
+    )
+    parser.add_argument(
+        "--rows",
+        type=int,
+        default=3,
+        help="Number of rows to fetch per feature view (default: 3)",
     )
 
     args = parser.parse_args()
@@ -84,22 +89,27 @@ def main():
 
                 feature_names = [col["name"] for col in columns]
 
-                # Find matching fixture scenario based on entity_type
                 scenario = None
                 for fixture_name, fixture_def in fixtures.items():
                     if fixture_def.get("entity_type") == entity_type:
                         scenario = fixture_def
                         break
 
+                sample_entities = []
                 if scenario:
-                    # Use entities from fixtures
-                    sample_entities = [record["entity"] for record in scenario["records"]]
-                else:
-                    # Fallback: generate based on entity_type
+                    fixture_entities = [record["entity"] for record in scenario["records"]]
+                    sample_entities.extend(fixture_entities[:args.rows])
+
+                # Generate additional entities if needed
+                if len(sample_entities) < args.rows:
+                    base_id = 1000 + len(fixture_entities) if scenario else 1000
+                    for i in range(len(sample_entities), args.rows):
+                        sample_entities.append(f"{entity_type}:{base_id + i - len(fixture_entities)}")
+
+                if not sample_entities:
                     sample_entities = [
-                        f"{entity_type}:1000",
-                        f"{entity_type}:1001",
-                        f"{entity_type}:1002",
+                        f"{entity_type}:{1000 + i}"
+                        for i in range(args.rows)
                     ]
 
                 print(f"\n  View: {view_name}")
@@ -114,17 +124,25 @@ def main():
 
                     print(f"    Retrieved {len(result)} rows")
 
-                    # Get metrics for this request
                     request_id = client.get_last_request_id()
                     if request_id:
                         try:
                             metrics = client.get_metrics(request_id)
                             print(f"    Request ID: {request_id}")
-                            print(f"    Latency: {metrics['total_ms']:.2f}ms")
-                            print(f"      - Registry lookup: {metrics['registry_lookup_ms']:.2f}ms")
-                            print(f"      - Dispatch: {metrics['dispatch_ms']:.2f}ms")
-                            print(f"      - Merge: {metrics['merge_ms']:.2f}ms")
-                            print(f"      - Serialization: {metrics['serialization_ms']:.2f}ms")
+                            print(f"      Latency Breakdown (11 Instrumentation Points):")
+                            print(f"      Registry lookup:    {metrics['registry_lookup_ms']:7.2f}ms")
+                            print(f"      Cache lookup:       {metrics['cache_lookup_ms']:7.2f}ms")
+                            print(f"      Partition:          {metrics['partition_ms']:7.2f}ms")
+                            print(f"      Dispatch:           {metrics['dispatch_ms']:7.2f}ms")
+                            print(f"      Backend Redis:      {metrics['backend_redis_ms']:7.2f}ms")
+                            print(f"      Backend PostgreSQL: {metrics['backend_postgres_ms']:7.2f}ms")
+                            print(f"      Backend Max:        {metrics['backend_max_ms']:7.2f}ms")
+                            print(f"      Alignment:          {metrics['alignment_ms']:7.2f}ms")
+                            print(f"      Merge:              {metrics['merge_ms']:7.2f}ms")
+                            print(f"      Validation:         {metrics['validation_ms']:7.2f}ms")
+                            print(f"      Serialization:      {metrics['serialization_ms']:7.2f}ms")
+                            print(f"      " + "-" * 45)
+                            print(f"      TOTAL:              {metrics['total_ms']:7.2f}ms")
                         except Exception as e:
                             print(f"    Metrics unavailable: {type(e).__name__}")
                     else:
