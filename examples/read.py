@@ -37,8 +37,9 @@ def main():
     print("=" * 70)
 
     try:
-        client = Client(args.server)
-        print(f"\n✓ Connected to Quiver server at {args.server}\n")
+        client = Client(args.server, observability_host="localhost", observability_port=8816)
+        print(f"\n✓ Connected to Quiver server at {args.server}")
+        print(f"✓ Observability service available at localhost:8816\n")
 
         print("=" * 70)
         print("SERVER CONFIGURATION")
@@ -111,8 +112,25 @@ def main():
                         feature_names,
                     )
 
-                    print(f"    Retrieved {len(result)} rows\n")
+                    print(f"    Retrieved {len(result)} rows")
 
+                    # Get metrics for this request
+                    request_id = client.get_last_request_id()
+                    if request_id:
+                        try:
+                            metrics = client.get_metrics(request_id)
+                            print(f"    Request ID: {request_id}")
+                            print(f"    Latency: {metrics['total_ms']:.2f}ms")
+                            print(f"      - Registry lookup: {metrics['registry_lookup_ms']:.2f}ms")
+                            print(f"      - Dispatch: {metrics['dispatch_ms']:.2f}ms")
+                            print(f"      - Merge: {metrics['merge_ms']:.2f}ms")
+                            print(f"      - Serialization: {metrics['serialization_ms']:.2f}ms")
+                        except Exception as e:
+                            print(f"    Metrics unavailable: {type(e).__name__}")
+                    else:
+                        print(f"    Request ID not available")
+
+                    print()
                     df = result.to_pandas()
                     print("    Data:")
                     for line in str(df).split("\n"):
