@@ -26,6 +26,7 @@ from .exceptions import (
 from .models import FeatureRequest, RequestContext, FeatureViewInfo
 from .table import FeatureTable
 from .proto import serving_pb2, types_pb2
+from .observability import ObservabilityClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,9 @@ class Client:
         compression: Optional[CompressionType] = None,
         default_null_strategy: NullStrategy = "fill_null",
         validate_connection: bool = False,
+        observability_host: Optional[str] = None,
+        observability_port: int = 8816,
+        observability_timeout: float = 5.0,
     ) -> None:
         self._host, self._port = self._normalize_address(address)
         self._timeout = timeout
@@ -65,6 +69,7 @@ class Client:
         self._compression = compression
         self._default_null_strategy = default_null_strategy
         self._closed = False
+        self._last_request_id: Optional[str] = None
 
         try:
             location = flight.Location.for_grpc_tcp(self._host, self._port)
@@ -76,6 +81,17 @@ class Client:
             raise QuiverConnectionError(
                 "Failed to create Flight client", f"{self._host}:{self._port}"
             )
+
+        obs_host = observability_host or self._host
+        try:
+            self._obs_client: Optional[ObservabilityClient] = ObservabilityClient(
+                host=obs_host,
+                port=observability_port,
+                timeout=observability_timeout,
+            )
+        except Exception as e:
+            logger.warning(f"Observability service not available: {str(e)}")
+            self._obs_client = None
 
         if validate_connection:
             self._validate_connection()
@@ -241,6 +257,15 @@ class Client:
                     table = pa.Table.from_batches(batches, schema)  # noqa
                 else:
                     table = pa.Table.from_arrays([], schema or pa.schema([]))  # noqa
+
+                # Extract request_id from the internal column if present
+                if "_quiver_request_id" in table.column_names:
+                    request_id_col = table.column("_quiver_request_id")
+                    if len(request_id_col) > 0:
+                        self._last_request_id = request_id_col[0].as_py()
+                    # Remove the internal column from the returned table
+                    col_indices = [i for i, name in enumerate(table.column_names) if name != "_quiver_request_id"]
+                    table = table.select(col_indices)
 
                 logger.debug(
                     f"Retrieved {len(table)} rows in {time.time() - start_time:.2f}s"
@@ -472,14 +497,93 @@ class Client:
         except Exception as e:
             raise QuiverServerError(f"Failed to list server actions: {str(e)}")
 
+    def get_last_request_id(self) -> Optional[str]:
+        """Get the request ID from the last feature request.
+
+        The request ID can be used to retrieve detailed metrics about the request
+        from the observability service via get_metrics().
+
+        Returns:
+            The request ID if available, None if no request has been made yet
+
+        Example:
+            table = client.get_features(...)
+            request_id = client.get_last_request_id()
+            if request_id:
+                metrics = client.get_metrics(request_id)
+                print(f"Total latency: {metrics['total_ms']:.2f}ms")
+        """
+        return self._last_request_id
+
+    def get_metrics(self, request_id: Optional[str] = None) -> Dict[str, Any]:
+        """Retrieve detailed metrics for a feature request.
+
+        Queries the observability service for latency metrics collected during
+        feature resolution. Metrics include 11 instrumentation points covering
+        registry lookup, dispatch, backend execution, merge, and more.
+
+        Args:
+            request_id: The request ID to retrieve metrics for. If None, uses the
+                       request ID from the last feature request.
+
+        Returns:
+            Dictionary with latency metrics (all in milliseconds):
+            - registry_lookup_ms: Time to lookup feature view in registry
+            - cache_lookup_ms: Time to check metrics cache
+            - partition_ms: Time to partition features by backend
+            - dispatch_ms: Time to submit requests to backends
+            - backend_redis_ms: Redis backend latency (0.0 if not used)
+            - backend_delta_ms: Delta backend latency (0.0 if not used)
+            - backend_postgres_ms: PostgreSQL backend latency (0.0 if not used)
+            - backend_max_ms: Maximum latency across all backends
+            - alignment_ms: Time to align entity results
+            - merge_ms: Time to merge backend results via Arrow LEFT JOIN
+            - validation_ms: Time to validate merged results
+            - serialization_ms: Time to convert to Arrow IPC format
+            - total_ms: Total request latency
+            - critical_path_ms: Critical path latency
+            - feature_view: Feature view that was queried
+            - entity_count: Number of entities requested
+            - request_timestamp: When the request was processed
+
+        Raises:
+            QuiverValidationError: If client is closed or no request_id available
+            QuiverConnectionError: If observability service unavailable
+            QuiverServerError: If request_id not found (metrics expired or invalid)
+            QuiverTimeoutError: If observability service times out
+
+        Example:
+            table = client.get_features("user_features", ["user1", "user2"], ["score"])
+            metrics = client.get_metrics()  # Uses last request ID
+            print(f"Merge latency: {metrics['merge_ms']:.2f}ms")
+        """
+        if self._closed:
+            raise QuiverValidationError("Client is closed")
+
+        if not self._obs_client:
+            raise QuiverConnectionError(
+                "Observability service not available",
+                "Check that observability service is running on port 8816",
+            )
+
+        effective_request_id = request_id or self._last_request_id
+        if not effective_request_id:
+            raise QuiverValidationError(
+                "No request_id available; either pass one explicitly or call get_features() first"
+            )
+
+        return self._obs_client.get_metrics(effective_request_id)
+
     def close(self) -> None:
         """Close connection to server."""
         if not self._closed:
             try:
                 if self._flight_client and hasattr(self._flight_client, "close"):
                     self._flight_client.close()
+                if self._obs_client:
+                    self._obs_client.close()
             except Exception as e:
-                logger.warning(f"Error closing Flight client: {e}")
+                logger.warning(f"Error closing client: {e}")
             finally:
                 self._closed = True
                 logger.info("Quiver client closed")

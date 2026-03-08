@@ -67,6 +67,7 @@ pub struct FilteredServerConfig {
     pub compression: Option<Compression>,
     pub timeout_seconds: Option<u64>,
     pub fanout: FanoutServerConfig,
+    pub observability: ObservabilityConfig,
 }
 
 /// Adapter config with connection details removed
@@ -105,6 +106,7 @@ impl Config {
                 compression: self.server.compression.clone(),
                 timeout_seconds: self.server.timeout_seconds,
                 fanout: self.server.fanout.clone(),
+                observability: self.server.observability.clone(),
             },
             registry: self.registry.clone(),
             adapters: self
@@ -150,6 +152,14 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
+
+        // Validate observability configuration
+        if self.server.observability.ttl_seconds == 0 {
+            errors.push("observability.ttl_seconds must be > 0".to_string());
+        }
+        if self.server.observability.max_entries == 0 {
+            errors.push("observability.max_entries must be > 0".to_string());
+        }
 
         // Validate fanout configuration
         if self.server.fanout.enabled {
@@ -339,6 +349,8 @@ pub struct ServerConfig {
     pub validation: ValidationConfig,
     #[serde(default)]
     pub fanout: FanoutServerConfig,
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
 }
 
 /// Fanout execution configuration.
@@ -363,6 +375,22 @@ pub struct FanoutServerConfig {
     pub downtime_strategy: DowntimeStrategy,
 }
 
+/// Observability service configuration.
+///
+/// Controls metrics store TTL and capacity for the observability service.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ObservabilityConfig {
+    /// Time-to-live for stored metrics in seconds (default: 3600 = 1 hour).
+    /// Metrics older than this are automatically evicted from the store.
+    #[serde(default = "default_observability_ttl_seconds")]
+    pub ttl_seconds: u64,
+
+    /// Maximum number of metrics to store in memory (default: 10000).
+    /// When this limit is reached, oldest entries are evicted (LRU).
+    #[serde(default = "default_observability_max_entries")]
+    pub max_entries: u32,
+}
+
 impl Default for FanoutServerConfig {
     fn default() -> Self {
         Self {
@@ -370,6 +398,15 @@ impl Default for FanoutServerConfig {
             max_concurrent_backends: 10,
             partial_failure_strategy: "null_fill".to_string(),
             downtime_strategy: DowntimeStrategy::Fail,
+        }
+    }
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            ttl_seconds: 3600,
+            max_entries: 10000,
         }
     }
 }
@@ -384,6 +421,14 @@ fn default_max_concurrent_backends() -> usize {
 
 fn default_partial_failure_strategy() -> String {
     "null_fill".to_string()
+}
+
+fn default_observability_ttl_seconds() -> u64 {
+    3600
+}
+
+fn default_observability_max_entries() -> u32 {
+    10000
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

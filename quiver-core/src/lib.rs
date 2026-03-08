@@ -2,6 +2,8 @@ pub mod adapters;
 pub mod config;
 pub mod fanout;
 pub mod logging;
+pub mod metrics;
+pub mod observability;
 pub mod proto;
 pub mod registry;
 pub mod resolver;

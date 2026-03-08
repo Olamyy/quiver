@@ -446,7 +446,7 @@ impl Resolver {
         entity_ids: &[String],
         as_of: Option<DateTime<Utc>>,
         timeout: Option<Duration>,
-    ) -> Result<RecordBatch, ResolverError> {
+    ) -> Result<(RecordBatch, FanoutLatencies), ResolverError> {
         let mut metrics = FanoutLatencies::new();
 
         let registry_timer = Timer::start();
@@ -510,7 +510,7 @@ impl Resolver {
                     .get(&backend_name)
                     .ok_or_else(|| ResolverError::BackendNotFound(backend_name.clone()))?;
 
-                adapter
+                let batch = adapter
                     .value()
                     .get_with_resolutions(
                         entity_ids,
@@ -521,7 +521,10 @@ impl Resolver {
                         timeout,
                     )
                     .await
-                    .map_err(ResolverError::Adapter)
+                    .map_err(ResolverError::Adapter)?;
+
+                metrics.finalize();
+                Ok((batch, metrics))
             }
             _ => {
                 let dispatch_timer = Timer::start();
@@ -620,7 +623,7 @@ impl Resolver {
                     metrics.critical_path_ms
                 );
 
-                Ok(merged)
+                Ok((merged, metrics))
             }
         }
     }

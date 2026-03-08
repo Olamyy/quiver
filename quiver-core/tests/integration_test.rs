@@ -9,6 +9,7 @@ use quiver_core::adapters::utils::ScalarValue;
 use quiver_core::config::{
     FilteredAdapterConfig, FilteredConfig, FilteredServerConfig, RegistryConfig,
 };
+use quiver_core::metrics::MetricsStore;
 use quiver_core::proto::quiver::v1::{EntityKey, FeatureRequest};
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
@@ -27,6 +28,7 @@ fn create_test_filtered_config() -> FilteredConfig {
             compression: None,
             timeout_seconds: None,
             fanout: Default::default(),
+            observability: Default::default(),
         },
         registry: RegistryConfig::Static { views: vec![] },
         adapters: {
@@ -61,7 +63,8 @@ async fn test_feature_serving_retrieval() {
     ));
     resolver.register_adapter("memory".to_string(), memory_adapter);
 
-    let service = QuiverFlightServer::new(resolver.clone(), None, create_test_filtered_config());
+    let metrics_store = Arc::new(MetricsStore::new());
+    let service = QuiverFlightServer::new(resolver.clone(), None, create_test_filtered_config(), metrics_store);
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(addr).unwrap();
@@ -177,7 +180,8 @@ async fn test_get_flight_info() {
         schema_version: 1,
     });
 
-    let service = QuiverFlightServer::new(resolver.clone(), None, create_test_filtered_config());
+    let metrics_store = Arc::new(MetricsStore::new());
+    let service = QuiverFlightServer::new(resolver.clone(), None, create_test_filtered_config(), metrics_store);
 
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(addr).unwrap();

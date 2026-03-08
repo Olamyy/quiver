@@ -6,7 +6,14 @@ server:
     enabled: true
     max_concurrent_backends: 10
     partial_failure_strategy: null_fill
-    downtime_strategy: fail
+    downtime_strategy: "return_available"
+  observability:
+    # Metrics store TTL in seconds (default: 3600 = 1 hour)
+    # Metrics older than this are automatically evicted from memory
+    ttl_seconds: 3600
+    # Maximum number of metrics to store in memory (default: 10000)
+    # Oldest entries are evicted using LRU when this limit is reached
+    max_entries: 10000
 
 registry:
   type: static
@@ -33,6 +40,9 @@ registry:
           source: redis_realtime
         - name: last_request_timestamp
           arrow_type: timestamp
+          source: redis_realtime
+        - name: feature_not_in_redis
+          arrow_type: string
           source: redis_realtime
 
 adapters:

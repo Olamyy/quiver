@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, info};
 
 use crate::config::{AccessLogConfig, FilteredConfig};
+use crate::metrics::MetricsStore;
 use crate::proto::quiver::v1::FeatureRequest;
 use crate::resolver::Resolver;
 use arrow_flight::encode::FlightDataEncoderBuilder;
@@ -18,6 +19,7 @@ use chrono::DateTime;
 use futures::StreamExt;
 use prost::Message;
 use std::sync::Arc;
+use uuid::Uuid;
 
 struct AccessLogData<'a> {
     endpoint: &'a str,
@@ -33,6 +35,7 @@ pub struct QuiverFlightServer {
     resolver: Arc<Resolver>,
     access_log_config: Option<AccessLogConfig>,
     filtered_config: FilteredConfig,
+    metrics_store: Arc<MetricsStore>,
 }
 
 impl QuiverFlightServer {
@@ -40,11 +43,13 @@ impl QuiverFlightServer {
         resolver: Arc<Resolver>,
         access_log_config: Option<AccessLogConfig>,
         filtered_config: FilteredConfig,
+        metrics_store: Arc<MetricsStore>,
     ) -> Self {
         Self {
             resolver,
             access_log_config,
             filtered_config,
+            metrics_store,
         }
     }
 
@@ -281,6 +286,7 @@ impl FlightService for QuiverFlightServer {
     ) -> Result<Response<Self::DoGetStream>, Status> {
         let start_time = Instant::now();
         let ticket = request.into_inner();
+        let request_id = Uuid::new_v4().to_string();
 
         let feature_request = match FeatureRequest::decode(ticket.ticket) {
             Ok(req) => req,
@@ -346,7 +352,7 @@ impl FlightService for QuiverFlightServer {
         let duration = start_time.elapsed();
 
         match batch_result {
-            Ok(batch) => {
+            Ok((batch, latencies)) => {
                 self.log_request(AccessLogData {
                     endpoint: "do_get",
                     feature_view: Some(feature_view),
@@ -357,17 +363,41 @@ impl FlightService for QuiverFlightServer {
                     error: None,
                 });
 
-                let stream = FlightDataEncoderBuilder::new()
-                    .build(futures::stream::once(async move { Ok(batch) }))
-                    .map(
-                        |res: Result<FlightData, arrow_flight::error::FlightError>| {
-                            res.map_err(|e| {
-                                Status::internal(format!("Flight encoding error: {}", e))
-                            })
-                        },
-                    );
+                // Store metrics for observability service
+                self.metrics_store
+                    .store(
+                        request_id.clone(),
+                        latencies,
+                        feature_view.clone(),
+                        entity_count as i32,
+                    )
+                    .await;
 
-                Ok(Response::new(Box::pin(stream)))
+                // Add request_id column to batch for client correlation
+                let request_id_array = arrow::array::StringArray::from(vec![request_id.as_str(); batch.num_rows()]);
+                let schema_with_id = {
+                    let mut fields = batch.schema().fields().to_vec();
+                    fields.push(std::sync::Arc::new(arrow::datatypes::Field::new("_quiver_request_id", arrow::datatypes::DataType::Utf8, false)));
+                    std::sync::Arc::new(arrow::datatypes::Schema::new(fields))
+                };
+
+                let mut columns = batch.columns().to_vec();
+                columns.push(std::sync::Arc::new(request_id_array) as std::sync::Arc<dyn arrow::array::Array>);
+
+                let batch_with_id = arrow::record_batch::RecordBatch::try_new(schema_with_id, columns)
+                    .map_err(|e| Status::internal(format!("Failed to add request_id column: {}", e)))?;
+
+                let encoder_stream = FlightDataEncoderBuilder::new()
+                    .build(futures::stream::once(async move { Ok(batch_with_id) }));
+
+                let error_mapped = encoder_stream.map(|res| {
+                    res.map_err(|e| Status::internal(format!("Flight encoding error: {}", e)))
+                });
+
+                let boxed_stream: Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>> =
+                    Box::pin(error_mapped);
+
+                Ok(Response::new(boxed_stream))
             }
             Err(e) => {
                 let error_msg = format!("Resolution failed: {}", e);
@@ -412,6 +442,7 @@ impl FlightService for QuiverFlightServer {
             .timeout_seconds
             .map(std::time::Duration::from_secs);
 
+        let metrics_store_clone = self.metrics_store.clone();
         let output_stream = async_stream::try_stream! {
             while let Some(data_res) = stream.next().await {
                 let data = data_res?;
@@ -430,7 +461,8 @@ impl FlightService for QuiverFlightServer {
                     DateTime::from_timestamp(ts.seconds, ts.nanos as u32).expect("Invalid timestamp")
                 });
 
-                let batch = resolver
+                let request_id = Uuid::new_v4().to_string();
+                let (batch, latencies) = resolver
                     .resolve(
                         &feature_request.feature_view,
                         &feature_request.feature_names,
@@ -440,6 +472,16 @@ impl FlightService for QuiverFlightServer {
                     )
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
+
+                // Store metrics for observability service
+                metrics_store_clone
+                    .store(
+                        request_id,
+                        latencies,
+                        feature_request.feature_view.clone(),
+                        entities.len() as i32,
+                    )
+                    .await;
 
                 let mut encoder = FlightDataEncoderBuilder::new()
                     .build(futures::stream::once(async move { Ok(batch) }));

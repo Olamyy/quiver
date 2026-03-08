@@ -8,6 +8,9 @@ use quiver_core::adapters::redis::RedisAdapter;
 use quiver_core::adapters::s3_parquet::S3ParquetAdapter;
 use quiver_core::config;
 use quiver_core::logging::ConfigLogger;
+use quiver_core::metrics::MetricsStore;
+use quiver_core::observability::ObservabilityServer;
+use quiver_core::proto::quiver::v1::observability_service_server::ObservabilityServiceServer;
 use quiver_core::registry::StaticRegistry;
 use quiver_core::resolver::Resolver;
 use quiver_core::server::QuiverFlightServer;
@@ -226,7 +229,18 @@ Loaded {} feature views and {} adapters",
         resolver.register_adapter(name, adapter);
     }
 
-    let server = QuiverFlightServer::new(resolver, cfg.server.access_log.clone(), filtered_config);
+    // Create shared metrics store with configured TTL and max entries
+    let metrics_store = Arc::new(MetricsStore::with_ttl(
+        cfg.server.observability.ttl_seconds,
+        cfg.server.observability.max_entries,
+    ));
+
+    let server = QuiverFlightServer::new(
+        resolver,
+        cfg.server.access_log.clone(),
+        filtered_config,
+        metrics_store.clone(),
+    );
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
@@ -281,6 +295,28 @@ Loaded {} feature views and {} adapters",
             config::Compression::None => {}
         }
     }
+
+    // Create observability service
+    let observability_server = ObservabilityServer::new(metrics_store);
+    let observability_service = ObservabilityServiceServer::new(observability_server);
+
+    let observability_addr = format!("{}:8816", cfg.server.host).parse()?;
+
+    tracing::info!(
+        "Starting observability service on {}",
+        observability_addr
+    );
+
+    // Spawn observability service on separate port
+    tokio::spawn(async move {
+        if let Err(e) = Server::builder()
+            .add_service(observability_service)
+            .serve(observability_addr)
+            .await
+        {
+            tracing::error!("Observability service error: {}", e);
+        }
+    });
 
     server_builder
         .add_service(health_service)
