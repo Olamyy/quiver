@@ -130,6 +130,55 @@ ci-check: ## Run complete CI pipeline (format check + lint + test + security)
 	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
 	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071
 
+.PHONY: bench
+bench: build-release ## Run all benchmarks (release mode, generates HTML report)
+	cd quiver-core && cargo bench --bench throughput
+
+.PHONY: bench-single
+bench-single: build-release ## Run specific benchmark scenario (usage: make bench-single SCENARIO=scenario_1)
+	cd quiver-core && cargo bench --bench throughput -- $(SCENARIO)
+
+.PHONY: bench-baseline
+bench-baseline: build-release ## Run baseline benchmarks only (fast iteration: Redis + Fanout 2x)
+	cd quiver-core && BENCH_BATCH_SIZES=1,100,1000 cargo bench --bench throughput -- "scenario_1" "scenario_2" "scenario_4"
+
+.PHONY: scenario-1
+scenario-1: build-release ## Run scenario_1 (redis baseline) - start server first with: make server-1
+	make bench-single SCENARIO=scenario_1
+
+.PHONY: scenario-2
+scenario-2: build-release ## Run scenario_2 (postgres baseline) - start server first with: make server-2
+	make bench-single SCENARIO=scenario_2
+
+.PHONY: scenario-3
+scenario-3: build-release ## Run scenario_3 (fanout 2x) - start server first with: make server-3
+	make bench-single SCENARIO=scenario_3
+
+.PHONY: scenario-4
+scenario-4: build-release ## Run scenario_4 (fanout 3x) - start server first with: make server-4
+	make bench-single SCENARIO=scenario_4
+
+.PHONY: server-kill
+server-kill: ## Kill any running Quiver server
+	@pkill -f "target/release/quiver-core" 2>/dev/null || true
+	@sleep 1
+
+.PHONY: server-1
+server-1: build-release server-kill ## Start server for scenario_1 (redis baseline)
+	cd quiver-core && cargo run --release -- --config ../examples/config/benchmark/redis-baseline.yaml
+
+.PHONY: server-2
+server-2: build-release server-kill ## Start server for scenario_2 (postgres baseline)
+	cd quiver-core && cargo run --release -- --config ../examples/config/benchmark/postgres-baseline.yaml
+
+.PHONY: server-3
+server-3: build-release server-kill ## Start server for scenario_3 (fanout 2x)
+	cd quiver-core && cargo run --release -- --config ../examples/config/benchmark/fanout-2x.yaml
+
+.PHONY: server-4
+server-4: build-release server-kill ## Start server for scenario_4 (fanout 3x)
+	cd quiver-core && cargo run --release -- --config ../examples/config/benchmark/fanout-3x.yaml
+
 .PHONY: main
 main: quality test ## Main development workflow (quality + test)
 
