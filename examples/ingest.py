@@ -56,8 +56,15 @@ def ingest_postgres(fixtures):
             total += 1
 
     conn.commit()
+
+    # Verify insertion
+    cursor.execute("SELECT COUNT(*) FROM ecommerce_data UNION ALL SELECT COUNT(*) FROM timeseries_data UNION ALL SELECT COUNT(*) FROM sessions_data")
+    counts = cursor.fetchall()
+    actual_total = sum(c[0] for c in counts)
     conn.close()
+
     print(f"PostgreSQL: {total} records inserted")
+    print(f"PostgreSQL: {actual_total} entities in store")
 
 
 def ingest_redis(fixtures):
@@ -71,9 +78,13 @@ def ingest_redis(fixtures):
             entity = record["entity"]
             for col in scenario_def["schema"].keys():
                 r.hset(entity, col, str(record.get(col, "")))
-                total += 1
+            total += 1
 
     print(f"Redis: {total} records inserted")
+
+    # Verify insertion
+    count = r.dbsize()
+    print(f"Redis: {count} entities in store")
 
 
 def ingest_clickhouse(fixtures):
@@ -152,12 +163,44 @@ def ingest_s3(fixtures):
     print(f"S3/Parquet: {total} feature files written to {storage_uri}/")
 
 
+def generate_fixtures(count):
+    """Generate fixtures with N entities per scenario."""
+    base_fixtures = load_fixtures()
+    generated = {}
+
+    for scenario_name, scenario_def in base_fixtures.items():
+        generated[scenario_name] = {
+            "table": scenario_def["table"],
+            "entity_type": scenario_def["entity_type"],
+            "entity_key": scenario_def["entity_key"],
+            "schema": scenario_def["schema"],
+            "records": []
+        }
+
+        # Generate N records, cycling through entity IDs
+        for i in range(count):
+            entity_type = scenario_def["entity_type"]
+            base_record = scenario_def["records"][i % len(scenario_def["records"])]
+
+            new_record = {
+                "entity": f"{entity_type}:{1000 + i}",
+                "timestamp": base_record["timestamp"]
+            }
+            for col in scenario_def["schema"].keys():
+                new_record[col] = base_record.get(col, "")
+
+            generated[scenario_name]["records"].append(new_record)
+
+    return generated
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest test data into feature store")
     parser.add_argument("engine", choices=["postgres", "redis", "clickhouse", "s3"], help="Target adapter")
+    parser.add_argument("--count", type=int, default=3, help="Number of entities per scenario to generate (default: 3)")
     args = parser.parse_args()
 
-    fixtures = load_fixtures()
+    fixtures = generate_fixtures(args.count)
 
     try:
         if args.engine == "postgres":

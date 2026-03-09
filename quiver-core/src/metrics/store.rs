@@ -69,6 +69,16 @@ impl MetricsStore {
     pub async fn get(&self, request_id: &str) -> Option<StoredMetrics> {
         self.cache.get(request_id).await
     }
+
+    /// Flush all metrics from the store.
+    ///
+    /// Used for cold cache benchmarking (iter_batched pattern).
+    /// Returns the number of entries cleared.
+    pub async fn flush(&self) -> i32 {
+        let count = self.cache.iter().count() as i32;
+        self.cache.invalidate_all();
+        count
+    }
 }
 
 impl Default for MetricsStore {
@@ -109,5 +119,38 @@ mod tests {
         let store = MetricsStore::new();
         let retrieved = store.get("nonexistent").await;
         assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_flush_clears_all_entries() {
+        let store = MetricsStore::new();
+        let mut latencies = FanoutLatencies::new();
+        latencies.record_phase(crate::fanout::metrics::Phase::Merge, 5.0);
+
+        store
+            .store(
+                "req-1".to_string(),
+                latencies.clone(),
+                "view1".to_string(),
+                10,
+            )
+            .await;
+        store
+            .store(
+                "req-2".to_string(),
+                latencies.clone(),
+                "view2".to_string(),
+                20,
+            )
+            .await;
+
+        assert!(store.get("req-1").await.is_some());
+        assert!(store.get("req-2").await.is_some());
+
+        let count = store.flush().await;
+        assert_eq!(count, 2);
+
+        assert!(store.get("req-1").await.is_none());
+        assert!(store.get("req-2").await.is_none());
     }
 }

@@ -1,10 +1,13 @@
 use crate::metrics::MetricsStore;
-use crate::proto::quiver::v1::{FanoutMetricsResponse, GetMetricsRequest, GetMetricsResponse};
+use crate::proto::quiver::v1::{
+    FanoutMetricsResponse, FlushMetricsStoreRequest, FlushMetricsStoreResponse, GetMetricsRequest,
+    GetMetricsResponse,
+};
 use prost_types::Timestamp;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tonic::{Request, Response, Status};
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub struct ObservabilityServer {
     metrics_store: Arc<MetricsStore>,
@@ -67,5 +70,14 @@ impl crate::proto::quiver::v1::observability_service_server::ObservabilityServic
         };
 
         Ok(Response::new(response))
+    }
+
+    async fn flush_metrics_store(
+        &self,
+        _request: Request<FlushMetricsStoreRequest>,
+    ) -> Result<Response<FlushMetricsStoreResponse>, Status> {
+        warn!("ADMIN: Flushing metrics store (benchmarking operation)");
+        let entries_cleared = self.metrics_store.flush().await;
+        Ok(Response::new(FlushMetricsStoreResponse { entries_cleared }))
     }
 }

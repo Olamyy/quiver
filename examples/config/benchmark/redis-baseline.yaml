@@ -1,0 +1,33 @@
+server:
+  host: 127.0.0.1
+  port: 8815
+  timeout_seconds: 30
+  access_log:
+    enabled: true
+    format: json
+
+registry:
+  type: static
+  views:
+    - name: sessions_view
+      entity_type: session
+      entity_key: entity
+      columns:
+        - name: active_user_id
+          arrow_type: string
+          source: redis_sessions
+        - name: request_count
+          arrow_type: int64
+          source: redis_sessions
+        - name: last_activity
+          arrow_type: timestamp
+          source: redis_sessions
+
+adapters:
+  redis_sessions:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "{entity}"
+    parameters:
+      mget_chunk_size: 1000
+    timeout_seconds: 10

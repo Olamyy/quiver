@@ -36,9 +36,24 @@ message GetMetricsResponse {
   int32 entity_count = 4;
 }
 
+/// Request to flush metrics store (for benchmarking cold cache measurements).
+/// Only available when compiled with testing feature.
+message FlushMetricsStoreRequest {
+}
+
+/// Response from flush operation.
+message FlushMetricsStoreResponse {
+  int32 entries_cleared = 1;
+}
+
 /// Observability service for retrieving request metrics.
 service ObservabilityService {
   /// Retrieve metrics for a previous feature request by ID.
   /// Returns NOT_FOUND if metrics have expired or request_id is invalid.
   rpc GetMetrics (GetMetricsRequest) returns (GetMetricsResponse);
+
+  /// Flush all entries from metrics store.
+  /// WARNING: Only available in testing builds. Returns UNIMPLEMENTED in production.
+  /// Used for cold cache benchmarking (iter_batched pattern in Criterion).
+  rpc FlushMetricsStore (FlushMetricsStoreRequest) returns (FlushMetricsStoreResponse);
 }

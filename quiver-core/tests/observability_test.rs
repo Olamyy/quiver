@@ -503,4 +503,45 @@ adapters:
             "Config is valid when fallback_source is provided with use_fallback strategy"
         );
     }
+
+    #[tokio::test]
+    async fn test_metrics_store_flush_for_benchmarking() {
+        use quiver_core::metrics::MetricsStore;
+
+        let store = MetricsStore::new();
+        let mut latencies = FanoutLatencies::new();
+        latencies.record_phase(Phase::Merge, 5.0);
+
+        store
+            .store(
+                "req-benchmark-1".to_string(),
+                latencies.clone(),
+                "test_view".to_string(),
+                100,
+            )
+            .await;
+        store
+            .store(
+                "req-benchmark-2".to_string(),
+                latencies.clone(),
+                "test_view".to_string(),
+                100,
+            )
+            .await;
+
+        assert!(store.get("req-benchmark-1").await.is_some());
+        assert!(store.get("req-benchmark-2").await.is_some());
+
+        let flushed = store.flush().await;
+        assert_eq!(flushed, 2, "Should have flushed 2 entries");
+
+        assert!(
+            store.get("req-benchmark-1").await.is_none(),
+            "Metrics should be cleared after flush"
+        );
+        assert!(
+            store.get("req-benchmark-2").await.is_none(),
+            "Metrics should be cleared after flush"
+        );
+    }
 }
