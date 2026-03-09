@@ -4,9 +4,14 @@ Ingest test data into feature store engines.
 
 Usage:
   uv run ingest.py postgres
-  uv run ingest.py redis
+  uv run ingest.py postgres --count 100
+  uv run ingest.py redis --count 1000
   uv run ingest.py clickhouse
   uv run ingest.py s3
+
+Options:
+  --count N    Number of entities to generate (default: 3)
+               Used for benchmarking: --count 100 or --count 10000
 """
 
 import argparse

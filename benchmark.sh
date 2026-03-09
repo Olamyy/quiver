@@ -179,23 +179,23 @@ if [[ "$SKIP_INGEST" != "true" ]]; then
     log_info "Clearing and re-ingesting data..."
     cd "$SCRIPT_DIR/examples"
 
-    # Run ingestion
-    log_info "Ingesting PostgreSQL data..."
-    uv run ingest.py postgres > /dev/null 2>&1 || {
+    # Run ingestion with specified entity count
+    log_info "Ingesting PostgreSQL data ($ENTITY_COUNT entities)..."
+    uv run ingest.py postgres --count "$ENTITY_COUNT" > /dev/null 2>&1 || {
         log_error "PostgreSQL ingestion failed"
         exit 1
     }
     log_success "PostgreSQL ingested"
 
-    log_info "Ingesting Redis data..."
-    uv run ingest.py redis > /dev/null 2>&1 || {
+    log_info "Ingesting Redis data ($ENTITY_COUNT entities)..."
+    uv run ingest.py redis --count "$ENTITY_COUNT" > /dev/null 2>&1 || {
         log_error "Redis ingestion failed"
         exit 1
     }
     log_success "Redis ingested"
 
-    log_info "Ingesting ClickHouse data..."
-    uv run ingest.py clickhouse > /dev/null 2>&1 || {
+    log_info "Ingesting ClickHouse data ($ENTITY_COUNT entities)..."
+    uv run ingest.py clickhouse --count "$ENTITY_COUNT" > /dev/null 2>&1 || {
         log_error "ClickHouse ingestion failed (optional)"
     }
     log_success "ClickHouse ingested (optional)"
