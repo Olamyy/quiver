@@ -31,7 +31,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chron
 clap = { version = "4.5.60", features = ["derive"] }
 url = "2.5"
 parquet = "58"
-object_store = { version = "0.11", features = ["aws"] }
+object_store = { version = "0.13", features = ["aws"] }
 aws-config = "1.1"
 aws-credential-types = "1.1"
 tokio-stream = "0.1"
