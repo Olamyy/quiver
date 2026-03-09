@@ -194,6 +194,15 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Release artifacts
+release-artifacts/
+release-files/
+*.tar.gz
+*.tar.gz.sha256
+*.zip
+*.zip.sha256
+SHA256SUMS.txt
+
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data

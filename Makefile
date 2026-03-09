@@ -179,6 +179,27 @@ server-3: build-release server-kill ## Start server for scenario_3 (fanout 2x)
 server-4: build-release server-kill ## Start server for scenario_4 (fanout 3x)
 	cd quiver-core && cargo run --release -- --config ../examples/config/benchmark/fanout-3x.yaml
 
+.PHONY: release-prepare
+release-prepare: .protoc ## Prepare for release (verify versions, run full CI)
+	@echo "Preparing for release..."
+	@VERSION=$$(grep '^version' quiver-core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'); \
+	echo "Version: $$VERSION"; \
+	echo "✅ Running full CI pipeline..."; \
+	make ci-check
+	@echo ""
+	@echo "✅ Release preparation complete!"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Update CHANGELOG.md with release summary"
+	@echo "  2. Commit version and changelog changes"
+	@echo "  3. Tag release: git tag v$$VERSION && git push origin main && git push origin v$$VERSION"
+	@echo "  4. GitHub Actions will automatically build and publish"
+
+.PHONY: release-build
+release-build: .protoc ## Build release binaries locally (for current platform)
+	@echo "Building release binaries..."
+	@./scripts/build-release.sh
+
 .PHONY: main
 main: quality test ## Main development workflow (quality + test)
 

@@ -1,0 +1,258 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+
+jobs:
+  verify-version:
+    name: Verify Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Verify version in Cargo.toml
+        run: |
+          CARGO_VERSION=$(grep '^version' quiver-core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: Cargo.toml has $CARGO_VERSION but tag is v$TAG_VERSION"
+            exit 1
+          fi
+          echo "Version verified: $TAG_VERSION"
+
+  build-binaries:
+    name: Build Binaries
+    needs: verify-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cross (for ARM64 on macOS)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo install cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v5
+        with:
+          path: quiver-core/target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (native)
+        if: matrix.target != 'aarch64-apple-darwin'
+        run: cd quiver-core && cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (cross-compile for ARM64)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cd quiver-core && cross build --release --target ${{ matrix.target }}
+
+      - name: Create archive (tar)
+        if: matrix.archive == 'tar'
+        run: |
+          VERSION=${{ needs.verify-version.outputs.version }}
+          TARGET=${{ matrix.target }}
+          BINARY_PATH="quiver-core/target/$TARGET/release/quiver-core"
+          ARCHIVE_NAME="quiver-server-v${VERSION}-${TARGET}.tar.gz"
+          tar czf "$ARCHIVE_NAME" -C quiver-core/target/$TARGET/release quiver-core
+          ls -lh "$ARCHIVE_NAME"
+
+      - name: Create archive (zip)
+        if: matrix.archive == 'zip'
+        run: |
+          $VERSION = "${{ needs.verify-version.outputs.version }}"
+          $TARGET = "${{ matrix.target }}"
+          $BINARY_PATH = "quiver-core/target/$TARGET/release/quiver-core.exe"
+          $ARCHIVE_NAME = "quiver-server-v${VERSION}-${TARGET}.zip"
+          powershell -Command "Compress-Archive -Path $BINARY_PATH -DestinationPath $ARCHIVE_NAME"
+          Get-Item $ARCHIVE_NAME | Select-Object -ExpandProperty FullName
+
+      - name: Generate checksums
+        if: runner.os != 'Windows'
+        run: |
+          VERSION=${{ needs.verify-version.outputs.version }}
+          TARGET=${{ matrix.target }}
+          ARCHIVE_NAME="quiver-server-v${VERSION}-${TARGET}.tar.gz"
+          shasum -a 256 "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
+          cat "${ARCHIVE_NAME}.sha256"
+
+      - name: Generate checksums (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $VERSION = "${{ needs.verify-version.outputs.version }}"
+          $TARGET = "${{ matrix.target }}"
+          $ARCHIVE_NAME = "quiver-server-v${VERSION}-${TARGET}.zip"
+          $HASH = (Get-FileHash -Path $ARCHIVE_NAME -Algorithm SHA256).Hash
+          Set-Content -Path "${ARCHIVE_NAME}.sha256" -Value "$HASH  $ARCHIVE_NAME"
+          Get-Content "${ARCHIVE_NAME}.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            quiver-server-v*.tar.gz
+            quiver-server-v*.tar.gz.sha256
+            quiver-server-v*.zip
+            quiver-server-v*.zip.sha256
+
+  build-docker:
+    name: Build and Push Docker Image
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}},value=v${{ needs.verify-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.verify-version.outputs.version }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}:v${{ needs.verify-version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository }}:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:latest
+          cache-to: type=inline
+
+  create-release:
+    name: Create GitHub Release
+    needs: [verify-version, build-binaries, build-docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          find release-artifacts -type f \( -name "*.tar.gz*" -o -name "*.zip*" \) -exec cp {} release-files/ \;
+          cd release-files && ls -lh
+
+      - name: Create combined checksums file
+        run: |
+          cd release-files
+          cat *.sha256 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ needs.verify-version.outputs.version }}"
+          # Extract changelog section for this version
+          awk "/## \[${VERSION}\]/,/## \[/" CHANGELOG.md | head -n -1 > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "## v${VERSION}" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            echo "Release v${VERSION}" >> RELEASE_NOTES.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release-files/quiver-server-v*.tar.gz
+            release-files/quiver-server-v*.zip
+            release-files/SHA256SUMS.txt
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  post-release:
+    name: Post-Release Notification
+    needs: [verify-version, create-release]
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Display release summary
+        run: |
+          VERSION="${{ needs.verify-version.outputs.version }}"
+          echo "Release v${VERSION} published successfully!"
+          echo ""
+          echo "Distribution methods:"
+          echo "  - GitHub Releases: https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
+          echo "  - Docker Image: ${{ env.REGISTRY }}/${{ github.repository }}:v${VERSION}"
+          echo "  - Cargo Install: cargo install quiver-core --version ${VERSION}"
+          echo ""
+          echo "Installation guide: docs/INSTALL.md"
