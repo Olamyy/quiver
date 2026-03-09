@@ -13,14 +13,10 @@ use arrow_flight::Ticket;
 /// Terminal 2: cd quiver-core && cargo run --release -- --config ../examples/config/benchmark/redis-baseline.yaml
 /// Terminal 3: make bench
 use arrow_flight::flight_service_client::FlightServiceClient;
-use criterion::{
-    BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
-};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::StreamExt;
 use prost::Message;
-use quiver_core::proto::quiver::v1::{
-    EntityKey, FeatureRequest,
-};
+use quiver_core::proto::quiver::v1::{EntityKey, FeatureRequest};
 use std::time::Duration;
 use tonic::transport::Channel;
 
@@ -114,7 +110,10 @@ impl QuiverBenchClient {
         feature_names: &[String],
         entity_type: &str,
     ) -> Result<Duration, Box<dyn std::error::Error>> {
-        eprintln!("[BENCH_FANOUT] Executing fanout request to {}", feature_view);
+        eprintln!(
+            "[BENCH_FANOUT] Executing fanout request to {}",
+            feature_view
+        );
         self.request_single_backend(feature_view, entities, feature_names, entity_type)
             .await
     }
@@ -272,10 +271,4 @@ criterion_group!(scenario_3, bench_fanout_2x);
 criterion_group!(scenario_4, bench_fanout_3x);
 criterion_group!(scenario_5, bench_batch_scaling);
 
-criterion_main!(
-    scenario_1,
-    scenario_2,
-    scenario_3,
-    scenario_4,
-    scenario_5
-);
+criterion_main!(scenario_1, scenario_2, scenario_3, scenario_4, scenario_5);
