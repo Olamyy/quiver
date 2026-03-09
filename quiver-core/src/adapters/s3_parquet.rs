@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use lru::LruCache;
 use object_store::ObjectStore;
+use object_store::ObjectStoreExt;
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use parquet::arrow::arrow_reader::ArrowReaderBuilder;
