@@ -1,33 +1,24 @@
 # Quiver
 
-**Quiver** is an experimental, Arrow‑native feature serving layer for machine learning inference.
+[![Rust Build](https://img.shields.io/github/actions/workflow/status/Olamyy/quiver/rust-ci.yml?branch=main&label=build)](https://github.com/Olamyy/quiver/actions)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](https://github.com/Olamyy/quiver/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/Olamyy/quiver?style=flat&sort=semver&color=blue)](https://github.com/Olamyy/quiver/releases)
 
-It sits between model servers and feature backends, resolving feature requests, executing parallel retrieval across data sources, and returning columnar feature data via Arrow Flight.
+
+**Quiver** is an experimental, Arrow‑native feature serving layer for machine learning inference. 
+It sits between model servers and feature backends, to resolve feature retrieval requests across multiple feature engines, and returns columnar feature data via Arrow Flight.
 
 ---
 
 # Overview and Motivation
 
-ML systems typically invest heavily in feature computation and model training, but the real‑time path for feature delivery to models often evolves organically inside application code. 
-For example, a typical ML inference pipeline ends up performing several expensive transformations:
-
-1. Fetch feature rows from multiple backends
-2. Deserialize row‑oriented data
-3. Join results across sources
-4. Convert rows into arrays
-5. Convert arrays into tensors
-
-This results in unnecessary latency, duplicated logic across services, and limited observability into what features models actually consume.
-
-In many production inference systems the serving path resembles the following pipeline.
+In many production ML inference systems the serving path resembles the following pipeline.
 
 ```
-Feature Computation
-(Spark / Polars / DuckDB)
+Feature Computation (Spark / Polars / DuckDB)
         |
         v
-Serialize rows
-(JSON / Protobuf)
+Serialize rows (JSON / Protobuf)
         |
         v
 Online store
@@ -44,37 +35,18 @@ Application server
 Model inference
 ```
 
-This already shows multiple inefficiencies.
+This approach creates a lot of inefficiencies:
 
-## Repeated serialization
-
-Features are often converted from columnar formats used during computation into row formats for storage, then converted back into arrays for inference.
-
-Each request incurs repeated serialization and deserialization overhead.
-
-## Row‑oriented data in a columnar workload
-
-Machine learning frameworks operate on vectors and tensors, yet many feature serving systems return row‑oriented data structures.
-
-This mismatch forces additional reshaping and copying inside model servers.
-
-## Fan‑out logic inside model services
-
-When features reside in multiple systems (for example Redis, Parquet, or a feature store), model servers must coordinate several backend requests.
-
-This logic is often duplicated across services and grows increasingly complex as feature sets expand.
-
-## Limited observability
-
-Monitoring systems frequently track feature pipelines or model outputs, but rarely capture statistics about **the actual features sent to models at serving time**.
+- Repeated serialization: Features are often converted from columnar formats used during computation into row formats for storage, then converted back into arrays for inference. Each request incurs repeated serialization and deserialization overhead.
+- Row‑oriented data in a columnar workload: Machine learning frameworks operate on vectors and tensors, yet many feature serving systems return row‑oriented data structures. This mismatch forces additional reshaping and copying inside model servers.
+- Fan‑out logic inside model services: When features reside in multiple systems (for example Redis, Parquet, or a feature store), model servers must coordinate several backend requests. This logic is often duplicated across services and grows increasingly complex as feature sets expand.
+- Monitoring systems frequently track feature pipelines or model outputs, but rarely capture statistics about **the actual features sent to models at serving time**.
 
 ---
 
 # What Quiver Does
 
-Quiver provides a unified layer that resolves feature requests and returns columnar feature batches optimized for inference workloads.
-
-Key capabilities include:
+Quiver provides a unified layer that resolves feature requests and returns columnar feature batches optimized for inference workloads. It has the following capabilities:
 
 ### Feature resolution
 
@@ -94,9 +66,7 @@ Feature requests are executed in parallel across multiple backends, eliminating 
 
 ### Columnar feature transport
 
-Quiver returns feature data as Arrow `RecordBatch` objects via Arrow Flight.
-
-Columnar batches enable efficient vectorized processing and straightforward conversion into tensors.
+Quiver returns feature data as Arrow `RecordBatch` objects via Arrow Flight. Columnar batches enable efficient vectorized processing and straightforward conversion into tensors.
 
 ### Request-level caching
 
@@ -114,15 +84,11 @@ Quiver is built around several principles.
 
 ## Arrow‑native data path
 
-Whenever possible, Quiver keeps features in Arrow columnar buffers from storage through inference.
-
-This avoids repeated row‑to‑column transformations and allows efficient batch processing.
+Whenever possible, Quiver keeps features in Arrow columnar buffers from storage through inference. This avoids repeated row‑to‑column transformations and allows efficient batch processing.
 
 ## Decoupled feature resolution
 
-Model servers should not need to know where features are stored or how they are retrieved.
-
-All backend routing logic lives inside Quiver.
+Model servers should not need to know where features are stored or how they are retrieved. All backend routing logic lives inside Quiver.
 
 ## Vectorized serving
 
@@ -142,23 +108,29 @@ Model services should ideally perform only two operations:
 The Quiver server consists of several cooperating components.
 
 ```
-Clients
-  |
-  v
-Arrow Flight Endpoint
-  |
-  v
+Clients (Model Servers)
+  ↓
+Arrow Flight Endpoint (gRPC)
+  ↓
 Feature Resolver
-  |
-  v
-Cache Layer (optional SWR)
-  |
-  v
-Execution Engine
-  |
-  +---- Redis
-  +---- Feature store
-  +---- Parquet / object storage
+  ├─ Registry lookup
+  ├─ Feature → Backend routing
+  ├─ Schema validation
+  └─ Type enforcement
+  ↓
+Cache Layer (Request-level)
+  ├─ TTL-based expiration
+  ├─ Request deduplication
+  └─ Observability metrics storage
+  ↓
+Execution Engine (Parallel Dispatch)
+  ├─ Redis adapter
+  ├─ PostgreSQL adapter
+  ├─ S3/Parquet adapter
+  ├─ ClickHouse adapter
+  └─ Memory adapter
+  ↓
+Result Assembly & Arrow Flight Response
 ```
 
 ## Flight endpoint
@@ -171,7 +143,7 @@ Maps logical feature requests to backend locations and determines how features s
 
 ## Cache layer
 
-Stores Arrow batches in memory and optionally supports stale‑while‑revalidate behavior.
+Stores Arrow batches in memory and optionally supports request caching.
 
 ## Execution engine
 
@@ -179,201 +151,100 @@ Coordinates parallel retrieval from backend adapters and merges results into a s
 
 ---
 
-# Supported Adapters
+## Supported Adapters
 
-- Memory (in-memory)
-- Redis
-- PostgreSQL
-- Parquet / S3
-- ClickHouse*
-
-*Available with extended configuration
-
----
-
-# Feature Request Model
-
-A typical request includes:
-
-* a feature view
-* one or more entities
-* a subset of feature columns
-
-Example:
-
-```
-feature_view: user_features
-entities: ["user_123", "user_456"]
-features: ["score", "country"]
-```
-
-The resolver determines which backends contain the requested features and executes the request accordingly.
+| Adapter | Status | Use Case | Features |
+|---------|--------|----------|----------|
+| **Memory** | Production | Testing & debugging | Fast, in-process |
+| **Redis** | Production | Real-time features | HSET-based, sub-ms latency |
+| **PostgreSQL** | Production | Historical data | Complex queries, temporal support |
+| **S3/Parquet** | Production | Data lake features | Columnar format, large datasets |
+| **ClickHouse** | Experimental | Analytical queries | OLAP workloads |
 
 ---
 
-# Observability
+## Quick Start
 
-Quiver collects 11 instrumentation points during feature resolution and exposes them via:
-
-* Response headers: `x-quiver-request-id`, `x-quiver-from-cache`
-* Observability service: `localhost:8816`
-* Python client: `client.get_metrics(request_id)`
-
----
-
-
-# Quick Start
-
-## Prerequisites
-
-* Rust
-* Protobuf compiler
-* grpcurl
-
-## Build
-
-```
- git clone <repository-url>
- cd quiver
- make
-```
-
-## Start the server
-
-```
-make run
-```
-
-## Verify health
-
-```
-grpcurl -plaintext localhost:8815 grpc.health.v1.Health/Check
-```
-
----
-
-# Configuration
-
-Quiver uses a YAML configuration file combined with environment variables.
-
-Configuration precedence:
-
-1. environment variables
-2. config file
-3. defaults
-
-## Configuration Examples
-
-The [`examples/`](examples/) directory contains configuration examples for different deployment scenarios:
-
-
-### Docker Development Environment
-
-For local testing with real databases:
+### 1. Prerequisites
 
 ```bash
-cd examples/docker
+# Install Rust, protobuf compiler, and development tools
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+brew install protobuf  # or apt-get install protobuf-compiler
+```
+
+### 2. Clone and Build
+
+```bash
+git clone https://github.com/Olamyy/quiver.git
+cd quiver
+make install
+make build
+```
+
+### 3. Start Backend Services (Docker)
+
+```bash
+cd examples
 docker-compose up -d
-QUIVER_CONFIG="examples/config/development.yaml" make run
+
+# Verify all services are running
+docker-compose ps
 ```
 
-## Basic Configuration Structure
+### 4. Ingest Test Data
 
-```yaml
-server:
-  host: "127.0.0.1"
-  port: 8815
-
-registry:
-  type: static
-  views:
-    - name: "user_features"
-      entity_type: "user"
-      entity_key: "user_id"
-      columns:
-        - name: "user_id"
-          arrow_type: "string"
-          nullable: false
-          source: "memory"
-
-        - name: "score"
-          arrow_type: "float64"
-          nullable: true
-          source: "memory"
-
-adapters:
-  memory:
-    type: memory
+```bash
+cd examples
+uv run ingest.py postgres    # Load PostgresSQL features
+uv run ingest.py redis       # Load Redis features
 ```
 
-See the [examples directory](examples/) for complete configuration examples and detailed documentation.
+### 5. Start Quiver Server
 
----
+```bash
+make run CONFIG=examples/config/postgres/basic.yaml
+```
 
-# Python Client
+The server will start on port `8815` and the observability service on `8816`.
+
+### 6. Query Features via Python Client
 
 Quiver includes a Python client with support for exporting to pandas, NumPy, PyTorch, and TensorFlow.
 
 [See Python Client Documentation](quiver-python/README.md)
 
-Example:
-
 ```python
 import quiver
+from pprint import pprint
 
+# Connect to Quiver
 client = quiver.Client("localhost:8815")
 
+# Request features for multiple entities
 features = client.get_features(
     feature_view="user_features",
-    entities=["user_123", "user_456"],
-    features=["score"]
+    entities=["user_1000", "user_1001", "user_1002"],
+    features=["score", "country"]
 )
 
-print(features.to_pandas())
+# Export to pandas, numpy, or ML frameworks
+df = features.to_pandas()
+print(df)
+
+# Get metrics for the request
+metrics = client.get_metrics(request_id="...")
+pprint(metrics)
 ```
 
+**Example Output:**
+
+```
+     entity         score  country
+0  user_1000  0.892345      USA
+1  user_1001  0.654321      Canada
+2  user_1002  0.445678      Mexico
+```
 ---
 
-# Project Structure
-
-```
-quiver/
-
-quiver-core/
-  Rust server implementation
-
-quiver-python/
-  Python client
-
-proto/
-  RPC definitions
-
-configs/
-  Example configurations
-```
-
----
-
-# Development
-
-Common commands:
-
-```
-make build
-make test
-make run
-```
-
----
-
-# Roadmap
-
-| Version | Milestone | Status |
-|---------|-----------|--------|
-| **v0.1** | Foundations | Complete |
-| **v0.2** | Multi‑backend execution | Complete |
-| **v0.3** | Caching and freshness | Complete |
-| **v0.4** | Observability | Complete |
-| **v0.5** | Request tracing | Complete |
-| **v0.6** | Benchmarks | In progress |
-
+For a more detailed guide on installation, configuration, and usage, please refer to the [Documentation](INSTALL.md).
