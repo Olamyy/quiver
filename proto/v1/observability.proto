@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package quiver.v1;
+
+import "google/protobuf/timestamp.proto";
+
+/// Fanout latency metrics response structure.
+/// Captures latency at each phase of the fanout pipeline.
+message FanoutMetricsResponse {
+  double registry_lookup_ms = 1;
+  double cache_lookup_ms = 2;
+  double partition_ms = 3;
+  double dispatch_ms = 4;
+  double backend_redis_ms = 5;
+  double backend_delta_ms = 6;
+  double backend_postgres_ms = 7;
+  double backend_max_ms = 8;
+  double alignment_ms = 9;
+  double merge_ms = 10;
+  double validation_ms = 11;
+  double serialization_ms = 12;
+  double total_ms = 13;
+  double critical_path_ms = 14;
+}
+
+/// Request to retrieve metrics for a specific feature request.
+message GetMetricsRequest {
+  string request_id = 1;
+}
+
+/// Response containing fanout metrics and metadata.
+message GetMetricsResponse {
+  FanoutMetricsResponse metrics = 1;
+  google.protobuf.Timestamp request_timestamp = 2;
+  string feature_view = 3;
+  int32 entity_count = 4;
+}
+
+/// Request to flush metrics store (for benchmarking cold cache measurements).
+/// Only available when compiled with testing feature.
+message FlushMetricsStoreRequest {
+}
+
+/// Response from flush operation.
+message FlushMetricsStoreResponse {
+  int32 entries_cleared = 1;
+}
+
+/// Observability service for retrieving request metrics.
+service ObservabilityService {
+  /// Retrieve metrics for a previous feature request by ID.
+  /// Returns NOT_FOUND if metrics have expired or request_id is invalid.
+  rpc GetMetrics (GetMetricsRequest) returns (GetMetricsResponse);
+
+  /// Flush all entries from metrics store.
+  /// WARNING: Only available in testing builds. Returns UNIMPLEMENTED in production.
+  /// Used for cold cache benchmarking (iter_batched pattern in Criterion).
+  rpc FlushMetricsStore (FlushMetricsStoreRequest) returns (FlushMetricsStoreResponse);
+}
