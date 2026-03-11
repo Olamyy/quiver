@@ -1,0 +1,88 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+  max_concurrent_rpcs: 100
+  max_message_size_mb: 32
+  compression: zstd
+
+  # Access logging for audit trails
+  access_log:
+    enabled: true
+    format: json
+    include_request_body: false
+    include_response_metadata: true
+
+  # Comprehensive validation
+  validation:
+    request_validations:
+      - entity_ids_not_empty
+      - feature_names_not_empty
+      - batch_size_limit
+      - sql_identifier_safety
+      - timeout_bounds
+      - memory_constraints
+    response_validations:
+      - schema_consistency
+      - data_type_validation
+      - null_value_policies
+      - timestamp_format
+
+registry:
+  type: static
+  views:
+    - name: ecommerce_features
+      entity_type: user
+      entity_key: user_id
+      source_path: "ecommerce_data"
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          nullable: false
+          source: clickhouse_adapter
+        - name: purchase_count
+          arrow_type: int64
+          nullable: false
+          source: clickhouse_adapter
+        - name: last_purchase_date
+          arrow_type: timestamp
+          nullable: true
+          source: clickhouse_adapter
+        - name: is_premium
+          arrow_type: bool
+          nullable: false
+          source: clickhouse_adapter
+
+    - name: timeseries_features
+      entity_type: sensor
+      entity_key: sensor_id
+      source_path: "timeseries_data"
+      columns:
+        - name: temperature
+          arrow_type: float64
+          nullable: true
+          source: clickhouse_adapter
+        - name: humidity
+          arrow_type: float64
+          nullable: true
+          source: clickhouse_adapter
+        - name: alert_triggered
+          arrow_type: bool
+          nullable: false
+          source: clickhouse_adapter
+
+adapters:
+  clickhouse_adapter:
+    type: clickhouse
+    connection_string: "clickhouse://default:${CLICKHOUSE_PASSWORD}@localhost:9000/quiver_test?enable_http_compression=1"
+    source_path: "{feature}"
+    max_connections: 25
+    timeout_seconds: 30
+    tls:
+      verify_certificates: true
+    parameters:
+      chunk_size: 50000
+
+# Set CLICKHOUSE_PASSWORD environment variable before running:
+#   export CLICKHOUSE_PASSWORD=your_password
+#   quiver serve --config examples/config/clickhouse/advanced.yaml

@@ -1,0 +1,61 @@
+server:
+  host: 0.0.0.0
+  port: 8815
+  timeout_seconds: 30
+  max_concurrent_rpcs: 200
+  max_message_size_mb: 8
+  compression: gzip
+
+  # Access logging
+  access_log:
+    enabled: true
+    format: json
+    include_response_metadata: true
+
+  # Request/response validation
+  validation:
+    request_validations:
+      - entity_ids_not_empty
+      - feature_names_not_empty
+      - batch_size_limit
+      - redis_key_safety
+      - timeout_bounds
+    response_validations:
+      - schema_consistency
+      - data_type_validation
+      - null_value_policies
+
+registry:
+  type: static
+  views:
+    - name: session_features
+      entity_type: session
+      entity_key: session_id
+      source_path: "sessions:{entity}"
+      columns:
+        - name: active_user_id
+          arrow_type: string
+          nullable: false
+          source: redis_adapter
+        - name: request_count
+          arrow_type: int64
+          nullable: false
+          source: redis_adapter
+        - name: last_activity
+          arrow_type: timestamp
+          nullable: true
+          source: redis_adapter
+
+adapters:
+  redis_adapter:
+    type: redis
+    connection: "redis://:${REDIS_PASSWORD}@localhost:6379/0"
+    source_path: "sessions:{entity}"
+    tls:
+      verify_certificates: true
+    parameters:
+      mget_chunk_size: 5000
+
+# Set REDIS_PASSWORD environment variable before running:
+#   export REDIS_PASSWORD=your_password
+#   quiver serve --config examples/config/redis/advanced.yaml
