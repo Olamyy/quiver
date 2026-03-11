@@ -1,0 +1,18 @@
+[project]
+name = "examples"
+version = "0.1.0"
+description = "Quiver examples: data ingestion and feature querying"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "psycopg2-binary>=2.9",
+    "redis>=5.0",
+    "clickhouse-driver>=0.2",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "boto3>=1.26",
+    "quiver-python",
+]
+
+[tool.uv.sources]
+quiver-python = { path = "../quiver-python", editable = true }
