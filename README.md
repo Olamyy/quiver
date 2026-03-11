@@ -289,9 +289,3 @@ pprint(metrics)
 ## Next Steps
 
 For more detailed installation, configuration, and advanced usage, see the [**Installation Guide**](INSTALL.md).
-
-- Different backends (Redis, PostgreSQL, S3, ClickHouse)
-- Custom feature configurations
-- Performance tuning
-- Observability and metrics
-- Production deployment strategies
