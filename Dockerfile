@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM rust:latest AS builder
+FROM rust:bookworm AS builder
 
 WORKDIR /build
 
@@ -19,9 +19,9 @@ RUN cd quiver-core && \
 # Stage 2: Runtime
 FROM debian:bookworm-slim
 
-# Install ca-certificates for HTTPS
+# Install ca-certificates and netcat for healthcheck
 RUN apt-get update && \
-    apt-get install -y ca-certificates && \
+    apt-get install -y ca-certificates netcat-openbsd && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -42,10 +42,12 @@ USER quiver
 # Expose ports (8815: Arrow Flight, 8816: Observability)
 EXPOSE 8815 8816
 
-# Health check
+# Health check - Verify Arrow Flight server is listening on port 8815
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD quiver-core --version || exit 1
+    CMD nc -z localhost 8815 || exit 1
 
 # Default entry point
+# Usage: docker run -e QUIVER_CONFIG=/config/app.yaml -v /path/to/config.yaml:/config/app.yaml quiver-server
+# Or:    docker run -v /path/to/config.yaml:/config/app.yaml quiver-server --config /config/app.yaml
 ENTRYPOINT ["quiver-core"]
-CMD ["--help"]
+CMD []

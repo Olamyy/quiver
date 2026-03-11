@@ -165,24 +165,61 @@ Coordinates parallel retrieval from backend adapters and merges results into a s
 
 ## Quick Start
 
-### 1. Prerequisites
+Choose your preferred installation method:
+
+### Option 1: Docker (Recommended for Quick Testing)
+
+Get Quiver running in seconds with a single command:
 
 ```bash
-# Install Rust, protobuf compiler, and development tools
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-brew install protobuf  # or apt-get install protobuf-compiler
+# Pull and run the latest Docker image
+docker pull ghcr.io/olamyy/quiver-server:latest
+docker run -p 8815:8815 -p 8816:8816 \
+  ghcr.io/olamyy/quiver-server:latest \
+  --config /etc/quiver/config.yaml
 ```
 
-### 2. Clone and Build
+Then mount your config file:
 
 ```bash
+docker run -p 8815:8815 -p 8816:8816 \
+  -v $(pwd)/your-config.yaml:/etc/quiver/config.yaml \
+  ghcr.io/olamyy/quiver-server:latest \
+  --config /etc/quiver/config.yaml
+```
+
+### Option 2: Binary Download (Fast, No Build Required)
+
+```bash
+# Download the latest release for your platform
+curl -L https://github.com/Olamyy/quiver/releases/download/v0.0.1/quiver-server-v0.0.1-aarch64-apple-darwin.tar.gz | tar xz
+
+# Run the server
+./quiver-core --config your-config.yaml
+```
+
+See [installation guide](INSTALL.md) for all platform options and checksums.
+
+### Option 3: Build from Source (For Contributors)
+
+```bash
+# Clone and install dependencies
 git clone https://github.com/Olamyy/quiver.git
 cd quiver
 make install
-make build
+
+# Build and run
+make build-release
+./quiver-core/target/release/quiver-core --config your-config.yaml
 ```
 
-### 3. Start Backend Services (Docker)
+---
+
+## Complete End-to-End Example
+
+Want to try Quiver with real backends? Follow this full walkthrough:
+
+### 1. Start Backend Services
 
 ```bash
 cd examples
@@ -192,27 +229,28 @@ docker-compose up -d
 docker-compose ps
 ```
 
-### 4. Ingest Test Data
+### 2. Ingest Test Data
 
 ```bash
 cd examples
-uv run ingest.py postgres    # Load PostgresSQL features
+uv run ingest.py postgres    # Load PostgreSQL features
+# or
 uv run ingest.py redis       # Load Redis features
 ```
 
-### 5. Start Quiver Server
+### 3. Start Quiver Server
+
+In a new terminal, start the Quiver server:
 
 ```bash
 make run CONFIG=examples/config/postgres/basic.yaml
 ```
 
-The server will start on port `8815` and the observability service on `8816`.
+The server will start on **port 8815** (Arrow Flight) and **8816** (Observability metrics).
 
-### 6. Query Features via Python Client
+### 4. Query Features via Python Client
 
 Quiver includes a Python client with support for exporting to pandas, NumPy, PyTorch, and TensorFlow.
-
-[See Python Client Documentation](quiver-python/README.md)
 
 ```python
 import quiver
@@ -245,6 +283,9 @@ pprint(metrics)
 1  user_1001  0.654321      Canada
 2  user_1002  0.445678      Mexico
 ```
+
 ---
 
-For a more detailed guide on installation, configuration, and usage, please refer to the [Documentation](INSTALL.md).
+## Next Steps
+
+For more detailed installation, configuration, and advanced usage, see the [**Installation Guide**](INSTALL.md).

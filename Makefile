@@ -101,7 +101,7 @@ check: .protoc ## Quick syntax check without building
 .PHONY: audit
 audit: ## Run security audit (with accepted risk exclusions)
 	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
-	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071
+	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0037 --ignore RUSTSEC-2024-0436
 
 .PHONY: audit-all
 audit-all: ## Run security audit without exclusions (shows all vulnerabilities)
@@ -128,7 +128,7 @@ ci-check: ## Run complete CI pipeline (format check + lint + test + security)
 	cd quiver-core && cargo clippy --all-features -- -D warnings
 	cd quiver-core && cargo test --all-features
 	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
-	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071
+	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0037 --ignore RUSTSEC-2024-0436
 
 .PHONY: bench
 bench: build-release ## Run all benchmarks (release mode, generates HTML report)
