@@ -580,7 +580,10 @@ registry:
 adapters: {}
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse YAML");
-        assert!(config.server.observability.enabled, "observability should be enabled by default");
+        assert!(
+            config.server.observability.enabled,
+            "observability should be enabled by default"
+        );
         assert_eq!(config.server.observability.ttl_seconds, 3600);
         assert_eq!(config.server.observability.max_entries, 10000);
     }
@@ -626,7 +629,10 @@ registry:
 adapters: {}
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse YAML");
-        assert!(config.validate().is_ok(), "Validation should pass when observability is disabled even with invalid ttl/max_entries");
+        assert!(
+            config.validate().is_ok(),
+            "Validation should pass when observability is disabled even with invalid ttl/max_entries"
+        );
     }
 
     #[test]
@@ -648,7 +654,10 @@ adapters: {}
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse YAML");
         let result = config.validate();
-        assert!(result.is_err(), "Validation should fail when ttl_seconds is 0 and observability is enabled");
+        assert!(
+            result.is_err(),
+            "Validation should fail when ttl_seconds is 0 and observability is enabled"
+        );
         assert!(result.unwrap_err()[0].contains("ttl_seconds must be > 0"));
     }
 }

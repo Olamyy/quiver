@@ -152,10 +152,16 @@ impl Config {
 
         if self.server.observability.enabled {
             if self.server.observability.ttl_seconds == 0 {
-                errors.push("observability.ttl_seconds must be > 0 when observability is enabled".to_string());
+                errors.push(
+                    "observability.ttl_seconds must be > 0 when observability is enabled"
+                        .to_string(),
+                );
             }
             if self.server.observability.max_entries == 0 {
-                errors.push("observability.max_entries must be > 0 when observability is enabled".to_string());
+                errors.push(
+                    "observability.max_entries must be > 0 when observability is enabled"
+                        .to_string(),
+                );
             }
         }
 
