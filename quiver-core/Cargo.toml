@@ -1,29 +1,52 @@
 [package]
 name = "quiver-core"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-arrow = "54"
-arrow-flight = "54"
-tonic = "0.12"
-prost = "0.13"
-prost-types = "0.13"
+arrow = "58"
+arrow-flight = "58"
+tonic = { version = "0.14", features = ["gzip", "tls-ring", "zstd"] }
+tonic-prost = "0.14"
+prost = "0.14"
+prost-types = "0.14"
 tokio = { version = "1.37", features = ["full"] }
 futures = "0.3"
 bytes = "1.6"
 dashmap = "6"
-hdrhistogram = "7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 async-trait = "0.1"
-thiserror = "1"
+thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
-tonic-health = "0.12"
-tonic-reflection = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+config = "0.15"
+tonic-health = "0.14"
+tonic-reflection = "0.14"
+async-stream = "0.3.6"
+redis = { version = "1.0.5", features = ["tokio-comp", "aio", "tokio-rustls-comp"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"], default-features = false }
+clap = { version = "4.5.60", features = ["derive"] }
+url = "2.5"
+parquet = "58"
+object_store = { version = "0.13", features = ["aws"] }
+aws-config = "1.1"
+aws-credential-types = "1.1"
+tokio-stream = "0.1"
+lru = "0.16"
+clickhouse = { version = "0.14", features = ["rustls-tls-webpki-roots"] }
+regex = "1.10"
+moka = { version = "0.12", features = ["future"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
 
 [build-dependencies]
-tonic-build = "0.12"
-prost-build = "0.13"
+tonic-prost-build = "0.14"
+
+[[bench]]
+name = "throughput"
+harness = false
