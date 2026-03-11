@@ -5,101 +5,29 @@
 [![GitHub Release](https://img.shields.io/github/v/release/Olamyy/quiver?style=flat&sort=semver&color=blue)](https://github.com/Olamyy/quiver/releases)
 
 
-**Quiver** is an experimental, Arrow‑native feature serving layer for machine learning inference. 
-It sits between model servers and feature backends, to resolve feature retrieval requests across multiple feature engines, and returns columnar feature data via Arrow Flight.
+**Quiver** is an Arrow-native feature serving layer for machine learning inference.
+It resolves feature requests across multiple backends and returns columnar data via Arrow Flight for direct consumption by model inference pipelines.
 
 ---
 
-# Overview and Motivation
+# The Problem
 
-In many production ML inference systems the serving path resembles the following pipeline.
+Traditional ML feature serving has several inefficiencies:
 
-```
-Feature Computation (Spark / Polars / DuckDB)
-        |
-        v
-Serialize rows (JSON / Protobuf)
-        |
-        v
-Online store
-(Redis / key‑value / PostgreSQL / S3 / Parquet/ ClickHouse)
-        |
-        v
-Application server
-        |
-        |-- fetch features from multiple systems
-        |-- deserialize rows
-        |-- reshape arrays
-        |-- convert to tensors
-        v
-Model inference
-```
-
-This approach creates a lot of inefficiencies:
-
-- Repeated serialization: Features are often converted from columnar formats used during computation into row formats for storage, then converted back into arrays for inference. Each request incurs repeated serialization and deserialization overhead.
-- Row‑oriented data in a columnar workload: Machine learning frameworks operate on vectors and tensors, yet many feature serving systems return row‑oriented data structures. This mismatch forces additional reshaping and copying inside model servers.
-- Fan‑out logic inside model services: When features reside in multiple systems (for example Redis, Parquet, or a feature store), model servers must coordinate several backend requests. This logic is often duplicated across services and grows increasingly complex as feature sets expand.
-- Monitoring systems frequently track feature pipelines or model outputs, but rarely capture statistics about **the actual features sent to models at serving time**.
+- **Repeated serialization**: Features move from columnar (computation) → row (storage) → columnar (inference), incurring overhead at each step.
+- **Row-oriented APIs**: Most serving systems return rows despite ML frameworks expecting columnar tensors, forcing additional reshaping inside model servers.
+- **Distributed fan-out**: When features span multiple backends (Redis, PostgreSQL, S3), model servers must orchestrate parallel requests, duplicate routing logic, and handle partial failures.
+- **Blind serving**: Most systems don't capture metrics about actual features sent to models at serving time.
 
 ---
 
-# What Quiver Does
+# What Quiver Solves
 
-Quiver provides a unified layer that resolves feature requests and returns columnar feature batches optimized for inference workloads. It has the following capabilities:
-
-### Feature resolution
-
-Model servers request logical feature names rather than backend‑specific queries.
-
-The Quiver resolver determines:
-
-* which backend stores each feature
-* which entity key should be used
-* the Arrow schema for the result
-
-This decouples model servers from storage details.
-
-### Parallel backend execution
-
-Feature requests are executed in parallel across multiple backends, eliminating sequential round‑trips from model servers.
-
-### Columnar feature transport
-
-Quiver returns feature data as Arrow `RecordBatch` objects via Arrow Flight. Columnar batches enable efficient vectorized processing and straightforward conversion into tensors.
-
-### Request-level caching
-
-Quiver includes optional caching with configurable TTL policies for repeated feature requests.
-
-### Serving‑time observability
-
-Because Quiver sits directly on the serving path, it can observe feature distributions and latency without requiring instrumentation inside model services.
-
----
-
-# Design Goals
-
-Quiver is built around several principles.
-
-## Arrow‑native data path
-
-Whenever possible, Quiver keeps features in Arrow columnar buffers from storage through inference. This avoids repeated row‑to‑column transformations and allows efficient batch processing.
-
-## Decoupled feature resolution
-
-Model servers should not need to know where features are stored or how they are retrieved. All backend routing logic lives inside Quiver.
-
-## Vectorized serving
-
-Inference workloads frequently request features for many entities simultaneously. Quiver is optimized for returning batches of features rather than individual rows.
-
-## Minimal application complexity
-
-Model services should ideally perform only two operations:
-
-1. request features
-2. run inference
+- **Feature resolution**: Map logical feature requests to physical backend locations without coupling model servers to storage details.
+- **Parallel execution**: Fetch from multiple backends concurrently, not sequentially.
+- **Columnar transport**: Return Arrow RecordBatch objects for direct tensor conversion.
+- **Request caching**: Optional TTL-based caching for repeated feature requests.
+- **Serving-time observability**: Capture feature latency and distributions without instrumenting model servers.
 
 ---
 
@@ -159,31 +87,17 @@ Coordinates parallel retrieval from backend adapters and merges results into a s
 | **Redis** | Production | Real-time features | HSET-based, sub-ms latency |
 | **PostgreSQL** | Production | Historical data | Complex queries, temporal support |
 | **S3/Parquet** | Production | Data lake features | Columnar format, large datasets |
-| **ClickHouse** | Experimental | Analytical queries | OLAP workloads |
+| **ClickHouse** | Production | Analytical queries | OLAP workloads |
 
 ---
 
 ## Quick Start
 
-Choose your preferred installation method:
-
-### Option 1: Docker (Recommended for Quick Testing)
-
-Get Quiver running in seconds with a single command:
-
-```bash
-# Pull and run the latest Docker image
-docker pull ghcr.io/olamyy/quiver-server:latest
-docker run -p 8815:8815 -p 8816:8816 \
-  ghcr.io/olamyy/quiver-server:latest \
-  --config /etc/quiver/config.yaml
-```
-
-Then mount your config file:
+### Option 1: Docker (Recommended)
 
 ```bash
 docker run -p 8815:8815 -p 8816:8816 \
-  -v $(pwd)/your-config.yaml:/etc/quiver/config.yaml \
+  -v $(pwd)/config.yaml:/etc/quiver/config.yaml \
   ghcr.io/olamyy/quiver-server:latest \
   --config /etc/quiver/config.yaml
 ```
@@ -200,24 +114,19 @@ curl -L https://github.com/Olamyy/quiver/releases/download/v0.0.1/quiver-server-
 
 See [installation guide](INSTALL.md) for all platform options and checksums.
 
-### Option 3: Build from Source (For Contributors)
+### Option 3: Build from Source
 
 ```bash
-# Clone and install dependencies
 git clone https://github.com/Olamyy/quiver.git
 cd quiver
 make install
-
-# Build and run
 make build-release
-./quiver-core/target/release/quiver-core --config your-config.yaml
+./quiver-core/target/release/quiver-core --config config.yaml
 ```
 
 ---
 
-## Complete End-to-End Example
-
-Want to try Quiver with real backends? Follow this full walkthrough:
+## Try It Out
 
 ### 1. Start Backend Services
 
@@ -240,52 +149,33 @@ uv run ingest.py redis       # Load Redis features
 
 ### 3. Start Quiver Server
 
-In a new terminal, start the Quiver server:
-
 ```bash
 make run CONFIG=examples/config/postgres/basic.yaml
 ```
 
-The server will start on **port 8815** (Arrow Flight) and **8816** (Observability metrics).
+Server runs on port 8815 (Arrow Flight) and 8816 (observability).
 
-### 4. Query Features via Python Client
-
-Quiver includes a Python client with support for exporting to pandas, NumPy, PyTorch, and TensorFlow.
+### 4. Query Features
 
 ```python
 import quiver
-from pprint import pprint
 
-# Connect to Quiver
 client = quiver.Client("localhost:8815")
 
-# Request features for multiple entities
 features = client.get_features(
     feature_view="user_features",
     entities=["user_1000", "user_1001", "user_1002"],
     features=["score", "country"]
 )
 
-# Export to pandas, numpy, or ML frameworks
-df = features.to_pandas()
+df = features.to_pandas()  # or .to_numpy(), .to_torch(), .to_tf()
 print(df)
-
-# Get metrics for the request
-metrics = client.get_metrics(request_id="...")
-pprint(metrics)
-```
-
-**Example Output:**
-
-```
-     entity         score  country
-0  user_1000  0.892345      USA
-1  user_1001  0.654321      Canada
-2  user_1002  0.445678      Mexico
 ```
 
 ---
 
-## Next Steps
+## Documentation
 
-For more detailed installation, configuration, and advanced usage, see the [**Installation Guide**](INSTALL.md).
+- [Installation Guide](INSTALL.md) — Platform-specific builds and configuration
+- [Configuration](examples/config/) — Feature views, adapters, and routing examples
+- [Python Client](quiver-python/) — API reference and framework integrations
