@@ -230,11 +230,16 @@ Loaded {} feature views and {} adapters",
         resolver.register_adapter(name, adapter);
     }
 
-    // Create shared metrics store with configured TTL and max entries
-    let metrics_store = Arc::new(MetricsStore::with_ttl(
-        cfg.server.observability.ttl_seconds,
-        cfg.server.observability.max_entries,
-    ));
+    // Create shared metrics store only if observability is enabled
+    let metrics_store = if cfg.server.observability.enabled {
+        Arc::new(MetricsStore::with_ttl(
+            cfg.server.observability.ttl_seconds,
+            cfg.server.observability.max_entries,
+        ))
+    } else {
+        // Create empty metrics store that won't be used (zero-cost when disabled)
+        Arc::new(MetricsStore::with_ttl(0, 0))
+    };
 
     // Create request cache for performance optimization
     let request_cache = Arc::new(RequestCache::new(cfg.server.cache.clone()));
@@ -301,24 +306,27 @@ Loaded {} feature views and {} adapters",
         }
     }
 
-    // Create observability service
-    let observability_server = ObservabilityServer::new(metrics_store);
-    let observability_service = ObservabilityServiceServer::new(observability_server);
+    // Conditionally start observability service if enabled
+    if cfg.server.observability.enabled {
+        let observability_server = ObservabilityServer::new(metrics_store);
+        let observability_service = ObservabilityServiceServer::new(observability_server);
 
-    let observability_addr = format!("{}:8816", cfg.server.host).parse()?;
+        let observability_addr = format!("{}:8816", cfg.server.host).parse()?;
 
-    tracing::info!("Starting observability service on {}", observability_addr);
+        tracing::info!("Starting observability service on {}", observability_addr);
 
-    // Spawn observability service on separate port
-    tokio::spawn(async move {
-        if let Err(e) = Server::builder()
-            .add_service(observability_service)
-            .serve(observability_addr)
-            .await
-        {
-            tracing::error!("Observability service error: {}", e);
-        }
-    });
+        tokio::spawn(async move {
+            if let Err(e) = Server::builder()
+                .add_service(observability_service)
+                .serve(observability_addr)
+                .await
+            {
+                tracing::error!("Observability service error: {}", e);
+            }
+        });
+    } else {
+        tracing::info!("Observability service disabled");
+    }
 
     server_builder
         .add_service(health_service)

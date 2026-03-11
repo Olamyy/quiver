@@ -38,6 +38,7 @@ pub struct QuiverFlightServer {
     filtered_config: FilteredConfig,
     metrics_store: Arc<MetricsStore>,
     request_cache: Arc<RequestCache>,
+    observability_enabled: bool,
 }
 
 impl QuiverFlightServer {
@@ -48,12 +49,14 @@ impl QuiverFlightServer {
         metrics_store: Arc<MetricsStore>,
         request_cache: Arc<RequestCache>,
     ) -> Self {
+        let observability_enabled = filtered_config.server.observability.enabled;
         Self {
             resolver,
             access_log_config,
             filtered_config,
             metrics_store,
             request_cache,
+            observability_enabled,
         }
     }
 
@@ -311,19 +314,23 @@ impl FlightService for QuiverFlightServer {
             }
         };
 
-        let request_id = if let Some(ctx) = &feature_request.context {
-            if !ctx.request_id.is_empty() {
-                debug!("Using client-provided request_id: {}", ctx.request_id);
-                ctx.request_id.clone()
+        let request_id = if self.observability_enabled {
+            if let Some(ctx) = &feature_request.context {
+                if !ctx.request_id.is_empty() {
+                    debug!("Using client-provided request_id: {}", ctx.request_id);
+                    ctx.request_id.clone()
+                } else {
+                    let gen_id = Uuid::new_v4().to_string();
+                    debug!("Generated new request_id (context empty): {}", gen_id);
+                    gen_id
+                }
             } else {
                 let gen_id = Uuid::new_v4().to_string();
-                debug!("Generated new request_id (context empty): {}", gen_id);
+                debug!("Generated new request_id (no context): {}", gen_id);
                 gen_id
             }
         } else {
-            let gen_id = Uuid::new_v4().to_string();
-            debug!("Generated new request_id (no context): {}", gen_id);
-            gen_id
+            String::new()
         };
 
         let feature_view = &feature_request.feature_view;
@@ -446,15 +453,17 @@ impl FlightService for QuiverFlightServer {
                     error: None,
                 });
 
-                // Store metrics for observability service
-                self.metrics_store
-                    .store(
-                        request_id.clone(),
-                        latencies.clone(),
-                        feature_view.clone(),
-                        entity_count as i32,
-                    )
-                    .await;
+                // Store metrics for observability service (only if enabled)
+                if self.observability_enabled {
+                    self.metrics_store
+                        .store(
+                            request_id.clone(),
+                            latencies.clone(),
+                            feature_view.clone(),
+                            entity_count as i32,
+                        )
+                        .await;
+                }
 
                 // Store result in request cache for performance optimization
                 self.request_cache
