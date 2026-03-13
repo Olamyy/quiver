@@ -29,6 +29,9 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use aws_config;
+use aws_config::BehaviorVersion;
+
 const BACKEND_NAME: &str = "s3_parquet";
 
 /// Date partitioning information extracted from source_path template.
@@ -92,7 +95,7 @@ pub struct S3ParquetAdapter {
     capabilities: AdapterCapabilities,
     #[allow(dead_code)]
     validation_config: ValidationConfig,
-    storage_uri: String,
+    bucket: String,
     date_partitioning: DatePartitioning,
     max_days_back: u32,
     #[allow(dead_code)]
@@ -103,7 +106,7 @@ impl S3ParquetAdapter {
     /// Create a new S3/Parquet adapter.
     ///
     /// # Arguments
-    /// - `config`: S3ParquetAdapterConfig with storage_uri, source_path, timeout
+    /// - `config`: S3ParquetAdapterConfig with bucket, source_path, timeout
     /// - `aws_auth`: Optional AWS authentication config (if None, uses env vars or IAM roles)
     pub async fn new(
         config: &S3ParquetAdapterConfig,
@@ -114,14 +117,14 @@ impl S3ParquetAdapter {
             SourcePath::Structured { table, .. } => table.clone(),
         };
 
-        let object_store = if config.storage_uri.starts_with("s3://") {
-            Self::create_s3_store(&config.storage_uri).await?
-        } else if config.storage_uri.starts_with("file://") {
-            Self::create_local_store(&config.storage_uri)?
+        let object_store = if config.bucket.starts_with("s3://") {
+            Self::create_s3_store(&config.bucket, config).await?
+        } else if config.bucket.starts_with("file://") {
+            Self::create_local_store(&config.bucket)?
         } else {
             return Err(AdapterError::invalid(
                 BACKEND_NAME,
-                "storage_uri must start with 's3://' or 'file://'",
+                "bucket must start with 's3://' or 'file://'",
             ));
         };
 
@@ -164,16 +167,30 @@ impl S3ParquetAdapter {
             timeout_default: timeout_duration,
             capabilities,
             validation_config: validation_config.unwrap_or_default(),
-            storage_uri: config.storage_uri.clone(),
+            bucket: config.bucket.clone(),
             date_partitioning,
             max_days_back: config.max_days_back,
             schema_cache,
         })
     }
 
-    /// Create an S3 object store from storage URI using environment credentials.
-    async fn create_s3_store(storage_uri: &str) -> Result<Arc<dyn ObjectStore>, AdapterError> {
-        let bucket = storage_uri
+    /// Create an S3 object store from storage URI using AWS SDK credential chain.
+    ///
+    /// Loads credentials from multiple sources in order:
+    /// 1. AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY environment variables
+    /// 2. ~/.aws/credentials file (default profile or specified profile)
+    /// 3. AWS SSO
+    /// 4. Instance metadata service (EC2)
+    ///
+    /// Resolves region in priority order:
+    /// 1. config.auth.region (can be a literal value or ${ENV_VAR} format)
+    /// 2. AWS_REGION environment variable
+    /// 3. SDK resolution (from ~/.aws/config or environment)
+    async fn create_s3_store(
+        bucket: &str,
+        config: &S3ParquetAdapterConfig,
+    ) -> Result<Arc<dyn ObjectStore>, AdapterError> {
+        let bucket = bucket
             .strip_prefix("s3://")
             .ok_or_else(|| AdapterError::invalid(BACKEND_NAME, "Invalid S3 URI format"))?
             .split('/')
@@ -182,12 +199,54 @@ impl S3ParquetAdapter {
                 AdapterError::invalid(BACKEND_NAME, "Could not extract bucket from S3 URI")
             })?;
 
-        let mut builder = AmazonS3Builder::from_env().with_bucket_name(bucket);
+        let sdk_config = aws_config::defaults(BehaviorVersion::latest())
+            .load()
+            .await;
 
-        if let Ok(region) = std::env::var("AWS_REGION") {
-            builder = builder.with_region(&region);
-            tracing::debug!("S3 adapter using region: {}", region);
+        let creds = match sdk_config.credentials_provider() {
+            Some(provider) => {
+                use aws_credential_types::provider::ProvideCredentials;
+                provider.provide_credentials().await
+                    .map_err(|e| {
+                        AdapterError::connection_failed(
+                            BACKEND_NAME,
+                            format!("Failed to load AWS credentials: {}", e),
+                        )
+                    })?
+            }
+            None => {
+                return Err(AdapterError::connection_failed(
+                    BACKEND_NAME,
+                    "No AWS credentials provider found. Set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY or configure ~/.aws/credentials"
+                ));
+            }
+        };
+
+        let mut builder = AmazonS3Builder::new()
+            .with_bucket_name(bucket)
+            .with_access_key_id(creds.access_key_id())
+            .with_secret_access_key(creds.secret_access_key());
+
+        if let Some(token) = creds.session_token() {
+            builder = builder.with_token(token);
+            tracing::debug!("S3 adapter using temporary session credentials");
+        } else {
+            tracing::debug!("S3 adapter using static credentials");
         }
+
+        let region = config.auth.region.as_ref()
+            .cloned()
+            .or_else(|| std::env::var("AWS_REGION").ok())
+            .or_else(|| sdk_config.region().map(|r| r.to_string()))
+            .ok_or_else(|| {
+                AdapterError::connection_failed(
+                    BACKEND_NAME,
+                    "AWS region not configured. Set auth.region in config, AWS_REGION environment variable, or configure in ~/.aws/config"
+                )
+            })?;
+
+        builder = builder.with_region(&region);
+        tracing::debug!("S3 adapter using region: {}", region);
 
         let store = builder.build().map_err(|e| {
             AdapterError::connection_failed(
@@ -200,8 +259,8 @@ impl S3ParquetAdapter {
     }
 
     /// Create a local filesystem object store from file URI.
-    fn create_local_store(storage_uri: &str) -> Result<Arc<dyn ObjectStore>, AdapterError> {
-        let path = storage_uri
+    fn create_local_store(bucket: &str) -> Result<Arc<dyn ObjectStore>, AdapterError> {
+        let path = bucket
             .strip_prefix("file://")
             .ok_or_else(|| AdapterError::invalid(BACKEND_NAME, "Invalid file URI format"))?;
 
@@ -456,7 +515,7 @@ impl BackendAdapter for S3ParquetAdapter {
                 HealthStatus {
                     healthy: true,
                     backend: BACKEND_NAME.to_string(),
-                    message: Some(format!("Connected to storage: {}", self.storage_uri)),
+                    message: Some(format!("Connected to storage: {}", self.bucket)),
                     latency_ms: Some(elapsed_ms),
                     last_check: Utc::now(),
                     capabilities_verified: true,
@@ -532,7 +591,7 @@ mod tests {
                 ordering_guarantee: OrderingGuarantee::Unordered,
             },
             validation_config: ValidationConfig::default(),
-            storage_uri: "file:///data".to_string(),
+            bucket: "file:///data".to_string(),
             date_partitioning,
             max_days_back: 365,
             schema_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(128).unwrap()))),

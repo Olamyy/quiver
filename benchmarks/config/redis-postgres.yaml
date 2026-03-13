@@ -14,34 +14,50 @@ server:
 registry:
   type: static
   views:
-    - name: extended_features
+    - name: ecommerce_view
       entity_type: user
       entity_key: entity
       columns:
-        - name: active_user_id
-          arrow_type: string
-          source: redis_sessions
-        - name: request_count
-          arrow_type: int64
-          source: redis_sessions
         - name: spend_30d
           arrow_type: float64
           source: postgres_ecommerce
         - name: purchase_count
           arrow_type: int64
           source: postgres_ecommerce
+        - name: last_purchase_date
+          arrow_type: string
+          source: postgres_ecommerce
+        - name: is_premium
+          arrow_type: bool
+          source: redis_ecommerce
+
+    - name: timeseries_view
+      entity_type: sensor
+      entity_key: entity
+      columns:
         - name: temperature
           arrow_type: float64
           source: postgres_timeseries
         - name: humidity
           arrow_type: float64
           source: postgres_timeseries
+        - name: alert_triggered
+          arrow_type: bool
+          source: redis_timeseries
 
 adapters:
-  redis_sessions:
+  redis_ecommerce:
     type: redis
     connection: "redis://localhost:6379/0"
-    source_path: "session:{entity}"
+    source_path: "{entity}"
+    parameters:
+      mget_chunk_size: 1000
+    timeout_seconds: 10
+
+  redis_timeseries:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "{entity}"
     parameters:
       mget_chunk_size: 1000
     timeout_seconds: 10

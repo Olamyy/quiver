@@ -104,13 +104,13 @@ class Client:
                 f"grpc://{self._host}:{self._port}",
                 middleware=middleware,
             )
-        except Exception:  # noqa
+        except Exception as e:  # noqa
             self._flight_client = None
 
-        if not self._flight_client:
-            raise QuiverConnectionError(
-                "Failed to create Flight client", f"{self._host}:{self._port}"
-            )
+            if not self._flight_client:
+                raise QuiverConnectionError(
+                    "Failed to create Flight client", f"{self._host}:{self._port} : {e}"
+                )
 
         obs_host = observability_host or self._host
         try:

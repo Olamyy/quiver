@@ -1,0 +1,54 @@
+server:
+  host: 127.0.0.1
+  port: 8815
+  timeout_seconds: 30
+  access_log:
+    enabled: true
+    format: json
+  fanout:
+    enabled: true
+    max_concurrent_backends: 10
+    partial_failure_strategy: "forward_fill"
+    downtime_strategy: "fail"
+
+registry:
+  type: static
+  views:
+    - name: ecommerce_view
+      entity_type: user
+      entity_key: entity
+      columns:
+        - name: lifetime_value
+          arrow_type: float64
+          source: s3
+
+    - name: timeseries_view
+      entity_type: sensor
+      entity_key: entity
+      columns:
+        - name: anomaly_score
+          arrow_type: float64
+          source: s3_timeseries
+
+adapters:
+  s3:
+    type: s3parquet
+    bucket: "s3://quiver-benchmark"
+    region: "eu-central-1"
+    source_path: "features/s3.parquet"
+    timeout_seconds: 30
+    auth:
+      region: "${AWS_REGION}"
+      access_key_id: "${AWS_ACCESS_KEY_ID}"
+      secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+
+  s3_timeseries:
+    type: s3parquet
+    bucket: "s3://quiver-benchmark"
+    region: "eu-central-1"
+    source_path: "features/s3_timeseries.parquet"
+    timeout_seconds: 30
+    auth:
+      region: "${AWS_REGION}"
+      access_key_id: "${AWS_ACCESS_KEY_ID}"
+      secret_access_key: "${AWS_SECRET_ACCESS_KEY}"

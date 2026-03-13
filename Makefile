@@ -142,6 +142,10 @@ bench-single: build-release ## Run specific benchmark scenario (usage: make benc
 bench-baseline: build-release ## Run baseline benchmarks only (fast iteration: Redis + Fanout 2x)
 	cd quiver-core && BENCH_BATCH_SIZES=1,100,1000 cargo bench --bench throughput -- "scenario_1" "scenario_2" "scenario_4"
 
+.PHONY: bench-comparison
+bench-comparison: ## Run comparative benchmark (Quiver vs application fan-out)
+	./benchmarks/run_benchmarks.sh
+
 .PHONY: scenario-1
 scenario-1: build-release ## Run scenario_1 (redis baseline) - start server first with: make server-1
 	make bench-single SCENARIO=scenario_1

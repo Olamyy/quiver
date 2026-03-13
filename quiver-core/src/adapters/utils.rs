@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use arrow::array::{
     Array, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
-    Int64Builder, PrimitiveBuilder, StringArray, StringBuilder,
+    Int64Builder, LargeStringArray, PrimitiveBuilder, StringArray, StringBuilder,
 };
 use arrow::datatypes::TimestampNanosecondType;
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
@@ -83,6 +83,9 @@ pub fn extract_scalar(array: &ArrayRef, row: usize) -> Option<ScalarValue> {
         return Some(ScalarValue::Int64(a.value(row)));
     }
     if let Some(a) = array.as_any().downcast_ref::<StringArray>() {
+        return Some(ScalarValue::Utf8(a.value(row).to_string()));
+    }
+    if let Some(a) = array.as_any().downcast_ref::<LargeStringArray>() {
         return Some(ScalarValue::Utf8(a.value(row).to_string()));
     }
     if let Some(a) = array.as_any().downcast_ref::<BooleanArray>() {
