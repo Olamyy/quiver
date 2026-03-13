@@ -130,38 +130,6 @@ ci-check: ## Run complete CI pipeline (format check + lint + test + security)
 	@cargo audit --version > /dev/null 2>&1 || cargo install cargo-audit
 	cd quiver-core && cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0037 --ignore RUSTSEC-2024-0436
 
-.PHONY: bench
-bench: build-release ## Run all benchmarks (release mode, generates HTML report)
-	cd quiver-core && cargo bench --bench throughput
-
-.PHONY: bench-single
-bench-single: build-release ## Run specific benchmark scenario (usage: make bench-single SCENARIO=scenario_1)
-	cd quiver-core && cargo bench --bench throughput -- $(SCENARIO)
-
-.PHONY: bench-baseline
-bench-baseline: build-release ## Run baseline benchmarks only (fast iteration: Redis + Fanout 2x)
-	cd quiver-core && BENCH_BATCH_SIZES=1,100,1000 cargo bench --bench throughput -- "scenario_1" "scenario_2" "scenario_4"
-
-.PHONY: bench-comparison
-bench-comparison: ## Run comparative benchmark (Quiver vs application fan-out)
-	./benchmarks/run_benchmarks.sh
-
-.PHONY: scenario-1
-scenario-1: build-release ## Run scenario_1 (redis baseline) - start server first with: make server-1
-	make bench-single SCENARIO=scenario_1
-
-.PHONY: scenario-2
-scenario-2: build-release ## Run scenario_2 (postgres baseline) - start server first with: make server-2
-	make bench-single SCENARIO=scenario_2
-
-.PHONY: scenario-3
-scenario-3: build-release ## Run scenario_3 (fanout 2x) - start server first with: make server-3
-	make bench-single SCENARIO=scenario_3
-
-.PHONY: scenario-4
-scenario-4: build-release ## Run scenario_4 (fanout 3x) - start server first with: make server-4
-	make bench-single SCENARIO=scenario_4
-
 .PHONY: server-kill
 server-kill: ## Kill any running Quiver server
 	@pkill -f "target/release/quiver-core" 2>/dev/null || true
@@ -188,10 +156,10 @@ release-prepare: .protoc ## Prepare for release (verify versions, run full CI)
 	@echo "Preparing for release..."
 	@VERSION=$$(grep '^version' quiver-core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'); \
 	echo "Version: $$VERSION"; \
-	echo "✅ Running full CI pipeline..."; \
+	echo "Running full CI pipeline..."; \
 	make ci-check
 	@echo ""
-	@echo "✅ Release preparation complete!"
+	@echo "Release preparation complete!"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  1. Update CHANGELOG.md with release summary"
