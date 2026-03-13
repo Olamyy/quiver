@@ -133,32 +133,34 @@ impl FanoutMerger {
         left_table: &RecordBatch,
         right_table: &RecordBatch,
     ) -> Result<RecordBatch, MergeError> {
-        use arrow::array::{Array, StringArray};
+        use arrow::array::{Array, LargeStringArray, StringArray};
         use std::collections::HashMap;
 
-        let left_entity_col = left_table
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| {
-                MergeError::MergeFailed("Left entity_id column is not StringArray".to_string())
-            })?;
-
-        let right_entity_col = right_table
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| {
-                MergeError::MergeFailed("Right entity_id column is not StringArray".to_string())
-            })?;
-
-        let mut right_index: HashMap<String, usize> = HashMap::new();
-        for i in 0..right_entity_col.len() {
-            let entity_id: &str = right_entity_col.value(i);
-            right_index.insert(entity_id.to_string(), i);
+        // Helper function to extract entity IDs from either StringArray or LargeStringArray
+        fn extract_entity_ids(col: &dyn Array) -> Result<Vec<String>, MergeError> {
+            if let Some(str_arr) = col.as_any().downcast_ref::<StringArray>() {
+                Ok((0..str_arr.len())
+                    .map(|i| str_arr.value(i).to_string())
+                    .collect())
+            } else if let Some(large_str_arr) = col.as_any().downcast_ref::<LargeStringArray>() {
+                Ok((0..large_str_arr.len())
+                    .map(|i| large_str_arr.value(i).to_string())
+                    .collect())
+            } else {
+                Err(MergeError::MergeFailed(
+                    "entity_id column is neither StringArray nor LargeStringArray".to_string(),
+                ))
+            }
         }
 
-        let left_num_rows = left_table.num_rows();
+        let left_entity_ids = extract_entity_ids(left_table.column(0))?;
+        let right_entity_ids = extract_entity_ids(right_table.column(0))?;
+
+        let mut right_index: HashMap<String, usize> = HashMap::new();
+        for (i, entity_id) in right_entity_ids.iter().enumerate() {
+            right_index.insert(entity_id.clone(), i);
+        }
+
         let right_num_cols = right_table.num_columns();
 
         let mut output_columns = Vec::new();
@@ -177,11 +179,10 @@ impl FanoutMerger {
             let right_col = right_table.column(right_col_idx);
 
             let new_col = Self::build_matched_column(
-                left_entity_col,
+                &left_entity_ids,
                 &right_index,
                 right_col.as_ref(),
                 right_field.data_type(),
-                left_num_rows,
             )?;
             output_columns.push(new_col);
         }
@@ -198,11 +199,10 @@ impl FanoutMerger {
 
     /// Build a matched column by joining left (all rows) with right (sparse rows)
     fn build_matched_column(
-        left_entity_col: &arrow::array::StringArray,
+        left_entity_ids: &[String],
         right_index: &std::collections::HashMap<String, usize>,
         right_col: &dyn arrow::array::Array,
         data_type: &arrow::datatypes::DataType,
-        left_num_rows: usize,
     ) -> Result<Arc<dyn arrow::array::Array>, MergeError> {
         use arrow::array::*;
         use arrow::datatypes::DataType;
@@ -215,9 +215,33 @@ impl FanoutMerger {
                     .ok_or_else(|| {
                         MergeError::TypeMismatch("String array downcast failed".to_string())
                     })?;
-                let mut builder = StringBuilder::with_capacity(left_num_rows, left_num_rows * 32);
-                for left_idx in 0..left_num_rows {
-                    let entity_id = left_entity_col.value(left_idx);
+                let mut builder =
+                    StringBuilder::with_capacity(left_entity_ids.len(), left_entity_ids.len() * 32);
+                for entity_id in left_entity_ids {
+                    if let Some(&right_idx) = right_index.get(entity_id) {
+                        if right_col.is_null(right_idx) {
+                            builder.append_null();
+                        } else {
+                            builder.append_value(right_arr.value(right_idx));
+                        }
+                    } else {
+                        builder.append_null();
+                    }
+                }
+                Ok(Arc::new(builder.finish()))
+            }
+            DataType::LargeUtf8 => {
+                let right_arr = right_col
+                    .as_any()
+                    .downcast_ref::<LargeStringArray>()
+                    .ok_or_else(|| {
+                        MergeError::TypeMismatch("LargeString array downcast failed".to_string())
+                    })?;
+                let mut builder = arrow::array::LargeStringBuilder::with_capacity(
+                    left_entity_ids.len(),
+                    left_entity_ids.len() * 32,
+                );
+                for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {
                             builder.append_null();
@@ -238,9 +262,8 @@ impl FanoutMerger {
                         .ok_or_else(|| {
                             MergeError::TypeMismatch("Int64 array downcast failed".to_string())
                         })?;
-                let mut builder = Int64Builder::with_capacity(left_num_rows);
-                for left_idx in 0..left_num_rows {
-                    let entity_id = left_entity_col.value(left_idx);
+                let mut builder = Int64Builder::with_capacity(left_entity_ids.len());
+                for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {
                             builder.append_null();
@@ -260,9 +283,8 @@ impl FanoutMerger {
                     .ok_or_else(|| {
                         MergeError::TypeMismatch("Float64 array downcast failed".to_string())
                     })?;
-                let mut builder = Float64Builder::with_capacity(left_num_rows);
-                for left_idx in 0..left_num_rows {
-                    let entity_id = left_entity_col.value(left_idx);
+                let mut builder = Float64Builder::with_capacity(left_entity_ids.len());
+                for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {
                             builder.append_null();
@@ -282,9 +304,8 @@ impl FanoutMerger {
                     .ok_or_else(|| {
                         MergeError::TypeMismatch("Boolean array downcast failed".to_string())
                     })?;
-                let mut builder = BooleanBuilder::with_capacity(left_num_rows);
-                for left_idx in 0..left_num_rows {
-                    let entity_id = left_entity_col.value(left_idx);
+                let mut builder = BooleanBuilder::with_capacity(left_entity_ids.len());
+                for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {
                             builder.append_null();
@@ -304,9 +325,8 @@ impl FanoutMerger {
                     .ok_or_else(|| {
                         MergeError::TypeMismatch("Timestamp array downcast failed".to_string())
                     })?;
-                let mut builder = TimestampNanosecondBuilder::with_capacity(left_num_rows);
-                for left_idx in 0..left_num_rows {
-                    let entity_id = left_entity_col.value(left_idx);
+                let mut builder = TimestampNanosecondBuilder::with_capacity(left_entity_ids.len());
+                for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {
                             builder.append_null();

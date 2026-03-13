@@ -81,7 +81,7 @@ pub enum FilteredAdapterConfig {
         timeout_seconds: Option<u64>,
     },
     S3Parquet {
-        storage_uri: String,
+        bucket: String,
         source_path: SourcePath,
         timeout_seconds: Option<u64>,
     },
@@ -126,7 +126,7 @@ impl Config {
                             timeout_seconds: *timeout_seconds,
                         },
                         AdapterConfig::S3Parquet(s3_cfg) => FilteredAdapterConfig::S3Parquet {
-                            storage_uri: s3_cfg.storage_uri.clone(),
+                            bucket: s3_cfg.bucket.clone(),
                             source_path: s3_cfg.source_path.clone(),
                             timeout_seconds: s3_cfg.timeout_seconds,
                         },
@@ -203,17 +203,16 @@ impl Config {
                     }
                 },
                 AdapterConfig::S3Parquet(s3_cfg) => {
-                    if s3_cfg.storage_uri.is_empty() {
+                    if s3_cfg.bucket.is_empty() {
                         errors.push(format!(
-                            "adapter '{}': storage_uri cannot be empty",
+                            "adapter '{}': bucket cannot be empty",
                             adapter_name
                         ));
                     }
-                    if !s3_cfg.storage_uri.starts_with("s3://")
-                        && !s3_cfg.storage_uri.starts_with("file://")
+                    if !s3_cfg.bucket.starts_with("s3://") && !s3_cfg.bucket.starts_with("file://")
                     {
                         errors.push(format!(
-                            "adapter '{}': storage_uri must start with 's3://' or 'file://'",
+                            "adapter '{}': bucket must start with 's3://' or 'file://'",
                             adapter_name
                         ));
                     }
@@ -538,7 +537,7 @@ pub fn is_tls_enabled_by_protocol(connection_string: &str) -> bool {
 /// S3/Parquet-specific adapter configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct S3ParquetAdapterConfig {
-    pub storage_uri: String,
+    pub bucket: String,
     #[serde(default = "default_s3_source_path")]
     pub source_path: SourcePath,
     pub timeout_seconds: Option<u64>,
@@ -547,6 +546,15 @@ pub struct S3ParquetAdapterConfig {
     pub parameters: HashMap<String, serde_json::Value>,
     #[serde(default = "default_max_days_back")]
     pub max_days_back: u32,
+    #[serde(default)]
+    pub auth: S3AuthConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct S3AuthConfig {
+    pub region: Option<String>,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
 }
 
 fn default_s3_source_path() -> SourcePath {

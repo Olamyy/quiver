@@ -135,9 +135,9 @@ impl ConfigLogger {
                 }
                 AdapterConfig::S3Parquet(s3_cfg) => {
                     tracing::info!(
-                        "Adapter '{}': type=s3_parquet, storage_uri={}",
+                        "Adapter '{}': type=s3_parquet, bucket={}",
                         name,
-                        s3_cfg.storage_uri
+                        s3_cfg.bucket
                     );
 
                     match &s3_cfg.source_path {

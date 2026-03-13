@@ -5,6 +5,7 @@ description = "Python client for Quiver gRPC server"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "boto3>=1.42.66",
     "grpcio-tools>=1.78.0",
     "pyarrow>=23.0.1",
 ]

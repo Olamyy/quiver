@@ -1,0 +1,101 @@
+server:
+  host: 127.0.0.1
+  port: 8815
+  timeout_seconds: 30
+  access_log:
+    enabled: true
+    format: json
+  fanout:
+    enabled: true
+    max_concurrent_backends: 10
+    partial_failure_strategy: null_fill
+    downtime_strategy: "return_available"
+  observability:
+    enabled: false
+
+registry:
+  type: static
+  views:
+    - name: ecommerce_view
+      entity_type: user
+      entity_key: entity
+      columns:
+        - name: spend_30d
+          arrow_type: float64
+          source: postgres
+        - name: purchase_count
+          arrow_type: int64
+          source: postgres
+        - name: last_purchase_date
+          arrow_type: string
+          source: postgres
+        - name: is_premium
+          arrow_type: bool
+          source: redis
+        - name: lifetime_value
+          arrow_type: float64
+          source: s3
+
+    - name: timeseries_view
+      entity_type: sensor
+      entity_key: entity
+      columns:
+        - name: temperature
+          arrow_type: float64
+          source: postgres_timeseries
+        - name: humidity
+          arrow_type: float64
+          source: postgres_timeseries
+        - name: alert_triggered
+          arrow_type: bool
+          source: redis_timeseries
+        - name: anomaly_score
+          arrow_type: float64
+          source: s3_timeseries
+
+adapters:
+  postgres:
+    type: postgres
+    connection_string: "postgresql://quiver:quiver_test@localhost:5432/quiver_test"
+    source_path: "ecommerce_data"
+    max_connections: 10
+    timeout_seconds: 20
+
+  postgres_timeseries:
+    type: postgres
+    connection_string: "postgresql://quiver:quiver_test@localhost:5432/quiver_test"
+    source_path: "timeseries_data"
+    max_connections: 10
+    timeout_seconds: 20
+
+  redis:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "{entity}"
+    parameters:
+      mget_chunk_size: 1000
+    timeout_seconds: 10
+
+  redis_timeseries:
+    type: redis
+    connection: "redis://localhost:6379/0"
+    source_path: "{entity}"
+    parameters:
+      mget_chunk_size: 1000
+    timeout_seconds: 10
+
+  s3:
+    type: s3parquet
+    bucket: "s3://quiver-benchmark"
+    source_path: "features/s3.parquet"
+    timeout_seconds: 30
+    auth:
+      region: "eu-central-1"
+
+  s3_timeseries:
+    type: s3parquet
+    bucket: "s3://quiver-benchmark"
+    source_path: "features/s3_timeseries.parquet"
+    timeout_seconds: 30
+    auth:
+      region: "eu-central-1"

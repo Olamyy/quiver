@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref path) = config_path {
         tracing::info!("Loading configuration from: {}", path);
     } else {
-        tracing::info!("Loading configuration from default search paths");
+        tracing::error!("Configuration file not found.");
     };
 
     let cfg = config::Config::load(config_path.as_deref())?;
@@ -230,18 +230,15 @@ Loaded {} feature views and {} adapters",
         resolver.register_adapter(name, adapter);
     }
 
-    // Create shared metrics store only if observability is enabled
     let metrics_store = if cfg.server.observability.enabled {
         Arc::new(MetricsStore::with_ttl(
             cfg.server.observability.ttl_seconds,
             cfg.server.observability.max_entries,
         ))
     } else {
-        // Create empty metrics store that won't be used (zero-cost when disabled)
         Arc::new(MetricsStore::with_ttl(0, 0))
     };
 
-    // Create request cache for performance optimization
     let request_cache = Arc::new(RequestCache::new(cfg.server.cache.clone()));
 
     let server = QuiverFlightServer::new(
@@ -306,7 +303,6 @@ Loaded {} feature views and {} adapters",
         }
     }
 
-    // Conditionally start observability service if enabled
     if cfg.server.observability.enabled {
         let observability_server = ObservabilityServer::new(metrics_store);
         let observability_service = ObservabilityServiceServer::new(observability_server);

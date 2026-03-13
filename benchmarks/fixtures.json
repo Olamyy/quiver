@@ -1,0 +1,83 @@
+{
+  "postgres": {
+    "table": "ecommerce_data",
+    "entity_type": "user",
+    "entity_key": "entity",
+    "schema": {
+      "spend_30d": "float64",
+      "purchase_count": "int64",
+      "last_purchase_date": "string"
+    },
+    "records": [
+      {"entity": "user:1000", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 450.50, "purchase_count": 5, "last_purchase_date": "2025-03-05T14:30:00Z"},
+      {"entity": "user:1001", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 150.25, "purchase_count": 2, "last_purchase_date": "2025-03-06T09:45:00Z"},
+      {"entity": "user:1002", "timestamp": "2025-03-07T12:00:00Z", "spend_30d": 1250.00, "purchase_count": 12, "last_purchase_date": "2025-03-07T11:00:00Z"}
+    ]
+  },
+  "redis": {
+    "table": "redis_ecommerce",
+    "entity_type": "user",
+    "entity_key": "entity",
+    "schema": {
+      "is_premium": "bool"
+    },
+    "records": [
+      {"entity": "user:1000", "timestamp": "2025-03-07T12:00:00Z", "is_premium": true},
+      {"entity": "user:1001", "timestamp": "2025-03-07T12:00:00Z", "is_premium": false},
+      {"entity": "user:1002", "timestamp": "2025-03-07T12:00:00Z", "is_premium": true}
+    ]
+  },
+  "s3": {
+    "table": "s3_ecommerce",
+    "entity_type": "user",
+    "entity_key": "entity",
+    "schema": {
+      "lifetime_value": "float64"
+    },
+    "records": [
+      {"entity": "user:1000", "timestamp": "2025-03-07T12:00:00Z", "lifetime_value": 5000.00},
+      {"entity": "user:1001", "timestamp": "2025-03-07T12:00:00Z", "lifetime_value": 1200.50},
+      {"entity": "user:1002", "timestamp": "2025-03-07T12:00:00Z", "lifetime_value": 12500.75}
+    ]
+  },
+  "postgres_timeseries": {
+    "table": "timeseries_data",
+    "entity_type": "sensor",
+    "entity_key": "entity",
+    "schema": {
+      "temperature": "float64",
+      "humidity": "float64"
+    },
+    "records": [
+      {"entity": "sensor:1000", "timestamp": "2025-03-07T12:00:00Z", "temperature": 22.5, "humidity": 45.3},
+      {"entity": "sensor:1001", "timestamp": "2025-03-07T12:00:00Z", "temperature": 18.5, "humidity": 60.1},
+      {"entity": "sensor:1002", "timestamp": "2025-03-07T12:00:00Z", "temperature": 25.0, "humidity": 50.0}
+    ]
+  },
+  "redis_timeseries": {
+    "table": "redis_timeseries",
+    "entity_type": "sensor",
+    "entity_key": "entity",
+    "schema": {
+      "alert_triggered": "bool"
+    },
+    "records": [
+      {"entity": "sensor:1000", "timestamp": "2025-03-07T12:00:00Z", "alert_triggered": false},
+      {"entity": "sensor:1001", "timestamp": "2025-03-07T12:00:00Z", "alert_triggered": true},
+      {"entity": "sensor:1002", "timestamp": "2025-03-07T12:00:00Z", "alert_triggered": false}
+    ]
+  },
+  "s3_timeseries": {
+    "table": "s3_timeseries",
+    "entity_type": "sensor",
+    "entity_key": "entity",
+    "schema": {
+      "anomaly_score": "float64"
+    },
+    "records": [
+      {"entity": "sensor:1000", "timestamp": "2025-03-07T12:00:00Z", "anomaly_score": 0.05},
+      {"entity": "sensor:1001", "timestamp": "2025-03-07T12:00:00Z", "anomaly_score": 0.85},
+      {"entity": "sensor:1002", "timestamp": "2025-03-07T12:00:00Z", "anomaly_score": 0.12}
+    ]
+  }
+}

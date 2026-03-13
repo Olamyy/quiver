@@ -32,7 +32,7 @@ clap = { version = "4.5.60", features = ["derive"] }
 url = "2.5"
 parquet = "58"
 object_store = { version = "0.13", features = ["aws"] }
-aws-config = "1.1"
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-credential-types = "1.1"
 tokio-stream = "0.1"
 lru = "0.16"
