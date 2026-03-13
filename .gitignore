@@ -222,7 +222,5 @@ __marimo__/
 test_env/*
 *-rfc*.md
 *.rlib
-quiver-core/config.yaml
-conf.yaml
 GTM
 *.md

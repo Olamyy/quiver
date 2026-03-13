@@ -19,9 +19,8 @@ Options:
 import argparse
 import io
 import json
-import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 import boto3
 import psycopg2
