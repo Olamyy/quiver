@@ -133,7 +133,7 @@ impl FanoutMerger {
         left_table: &RecordBatch,
         right_table: &RecordBatch,
     ) -> Result<RecordBatch, MergeError> {
-        use arrow::array::{Array, StringArray, LargeStringArray};
+        use arrow::array::{Array, LargeStringArray, StringArray};
         use std::collections::HashMap;
 
         // Helper function to extract entity IDs from either StringArray or LargeStringArray
@@ -215,7 +215,8 @@ impl FanoutMerger {
                     .ok_or_else(|| {
                         MergeError::TypeMismatch("String array downcast failed".to_string())
                     })?;
-                let mut builder = StringBuilder::with_capacity(left_entity_ids.len(), left_entity_ids.len() * 32);
+                let mut builder =
+                    StringBuilder::with_capacity(left_entity_ids.len(), left_entity_ids.len() * 32);
                 for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {
@@ -236,7 +237,10 @@ impl FanoutMerger {
                     .ok_or_else(|| {
                         MergeError::TypeMismatch("LargeString array downcast failed".to_string())
                     })?;
-                let mut builder = arrow::array::LargeStringBuilder::with_capacity(left_entity_ids.len(), left_entity_ids.len() * 32);
+                let mut builder = arrow::array::LargeStringBuilder::with_capacity(
+                    left_entity_ids.len(),
+                    left_entity_ids.len() * 32,
+                );
                 for entity_id in left_entity_ids {
                     if let Some(&right_idx) = right_index.get(entity_id) {
                         if right_col.is_null(right_idx) {

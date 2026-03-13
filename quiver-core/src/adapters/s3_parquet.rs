@@ -199,25 +199,22 @@ impl S3ParquetAdapter {
                 AdapterError::invalid(BACKEND_NAME, "Could not extract bucket from S3 URI")
             })?;
 
-        let sdk_config = aws_config::defaults(BehaviorVersion::latest())
-            .load()
-            .await;
+        let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
 
         let creds = match sdk_config.credentials_provider() {
             Some(provider) => {
                 use aws_credential_types::provider::ProvideCredentials;
-                provider.provide_credentials().await
-                    .map_err(|e| {
-                        AdapterError::connection_failed(
-                            BACKEND_NAME,
-                            format!("Failed to load AWS credentials: {}", e),
-                        )
-                    })?
+                provider.provide_credentials().await.map_err(|e| {
+                    AdapterError::connection_failed(
+                        BACKEND_NAME,
+                        format!("Failed to load AWS credentials: {}", e),
+                    )
+                })?
             }
             None => {
                 return Err(AdapterError::connection_failed(
                     BACKEND_NAME,
-                    "No AWS credentials provider found. Set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY or configure ~/.aws/credentials"
+                    "No AWS credentials provider found. Set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY or configure ~/.aws/credentials",
                 ));
             }
         };
