@@ -33,7 +33,7 @@ Traditional ML feature serving has several inefficiencies:
 
 # Architecture
 
-The Quiver server consists of several cooperating components.
+The Quiver server consists of several components.
 
 ```
 Clients (Model Servers)
