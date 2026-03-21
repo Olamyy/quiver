@@ -224,3 +224,4 @@ test_env/*
 *.rlib
 GTM
 *.md
+!docs/*.md

@@ -176,6 +176,11 @@ print(df)
 
 ## Documentation
 
-- [Installation Guide](INSTALL.md) — Platform-specific builds and configuration
-- [Configuration](examples/config/) — Feature views, adapters, and routing examples
-- [Python Client](quiver-python/) — API reference and framework integrations
+Full documentation is at **[olamyy.github.io/quiver](https://olamyy.github.io/quiver)**.
+
+| Section | |
+|---|---|
+| [Quickstart](https://olamyy.github.io/quiver/getting-started/quickstart/) | Step-by-step tutorial with PostgreSQL and Redis |
+| [Architecture](https://olamyy.github.io/quiver/concepts/architecture/) | How the serving path works end to end |
+| [Configuration](https://olamyy.github.io/quiver/concepts/configuration/) | Full YAML reference with auth and adapter options |
+| [Python Client](https://olamyy.github.io/quiver/reference/python-client/) | SDK reference for `Client` and `FeatureTable` |
