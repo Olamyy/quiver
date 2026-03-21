@@ -1,0 +1,1472 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Arrow-native feature serving for ML inference">
+      
+      
+      
+        <link rel="canonical" href="https://olamyy.github.io/quiver/">
+      
+      
+      
+        <link rel="next" href="getting-started/introduction/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Quiver - Quiver</title>
+      
+    
+    
+  
+      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet">
+  <style>
+    /* ── Hide Material chrome that conflicts with custom layout ── */
+    .md-header, .md-tabs, .md-sidebar { display: none !important; }
+    .md-main { margin: 0 !important; padding: 0 !important; }
+    .md-container { padding: 0 !important; margin: 0 !important; }
+    .md-main__inner { margin: 0 !important; padding: 0 !important; max-width: none !important; }
+    /* md-content is overridden per-section below — not hidden globally */
+    .md-content__inner { margin: 0 !important; padding: 0 !important; }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg: #080c18;
+      --bg2: #0d1225;
+      --indigo: #5c6ef5;
+      --indigo-glow: rgba(92,110,245,0.4);
+      --cyan: #3de8c8;
+      --qtext: #e8eaf6;
+      --qtext-dim: rgba(232,234,246,0.55);
+      --border: rgba(92,110,245,0.18);
+    }
+
+    .quiver-page {
+      background: var(--bg);
+      color: var(--qtext);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* ── Canvas + overlays ── */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      width: 100%; height: 100%;
+    }
+    .q-grid-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 20%, transparent 100%);
+    }
+    .q-blob {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .q-blob-1 {
+      width: 600px; height: 400px;
+      background: rgba(92,110,245,0.12);
+      top: -100px; left: -100px;
+      animation: qBlobDrift 12s ease-in-out infinite alternate;
+    }
+    .q-blob-2 {
+      width: 500px; height: 350px;
+      background: rgba(61,232,200,0.06);
+      bottom: 0; right: -50px;
+      animation: qBlobDrift 15s ease-in-out infinite alternate-reverse;
+    }
+    @keyframes qBlobDrift {
+      from { transform: translate(0,0) scale(1); }
+      to   { transform: translate(40px,30px) scale(1.1); }
+    }
+
+    /* ── Nav ── */
+    .q-nav {
+      position: relative;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 2.5rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,12,24,0.8);
+      backdrop-filter: blur(12px);
+    }
+    .q-nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      text-decoration: none;
+    }
+    .q-nav-logo-text {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: var(--qtext);
+      letter-spacing: -0.02em;
+    }
+    .q-nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+      margin: 0; padding: 0;
+    }
+    .q-nav-links li { margin: 0; padding: 0; }
+    .q-nav-links a {
+      color: var(--qtext-dim);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 300;
+      transition: color 0.2s;
+    }
+    .q-nav-links a:hover { color: var(--qtext); }
+    .q-nav-gh {
+      display: flex !important;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: 'DM Mono', monospace !important;
+      font-size: 0.78rem !important;
+    }
+
+    /* ── Hero two-column ── */
+    .q-hero {
+      position: relative;
+      z-index: 10;
+      min-height: calc(100vh - 57px);
+      display: grid;
+      grid-template-columns: 1fr 440px;
+      align-items: center;
+      gap: 3rem;
+      padding: 4rem 2.5rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .q-hero-left {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .q-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      border: 1px solid rgba(61,232,200,0.25);
+      padding: 0.3rem 0.8rem;
+      border-radius: 2px;
+      margin-bottom: 1.75rem;
+      animation: qFadeUp 0.6s ease both;
+    }
+    .q-eyebrow::before {
+      content: '';
+      width: 5px; height: 5px;
+      background: var(--cyan);
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: qPulse 2s ease-in-out infinite;
+    }
+
+    .q-headline {
+      font-family: sans-serif !important;
+      font-weight: 500 !important;
+      font-size: clamp(1.4rem, 5vw, 3.5rem) !important;
+      line-height: 1.05 !important;
+      letter-spacing: -0.03em !important;
+      color: #e8eaf6 !important;
+      margin: 0 0 1.25rem !important;
+      padding: 0 !important;
+      border: none !important;
+      animation: qFadeUp 0.6s 0.1s ease both;
+    }
+    .q-headline em {
+      font-style: normal !important;
+      background: linear-gradient(135deg, #5c6ef5, #3de8c8) !important;
+      -webkit-background-clip: text !important;
+      background-clip: text !important;
+      color: transparent !important;
+    }
+
+    .q-sub {
+      font-size: 0.975rem;
+      font-weight: 300;
+      line-height: 1.75;
+      color: var(--qtext-dim);
+      max-width: 46ch;
+      margin: 0 0 2.25rem;
+      animation: qFadeUp 0.6s 0.2s ease both;
+    }
+    .q-sub strong { color: var(--qtext); font-weight: 400; }
+
+    .q-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 3rem;
+      animation: qFadeUp 0.6s 0.3s ease both;
+    }
+    .q-btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--indigo);
+      color: #fff !important;
+      font-size: 0.875rem;
+      padding: 0.65rem 1.4rem;
+      border-radius: 3px;
+      text-decoration: none !important;
+      border: 1px solid var(--indigo);
+      transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
+    }
+    .q-btn-primary:hover {
+      background: #6b7ef8;
+      box-shadow: 0 0 24px var(--indigo-glow);
+      transform: translateY(-1px);
+    }
+    .q-btn-outline {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: transparent;
+      color: var(--qtext-dim) !important;
+      font-size: 0.875rem;
+      padding: 0.65rem 1.4rem;
+      border-radius: 3px;
+      text-decoration: none !important;
+      border: 1px solid var(--border);
+      transition: border-color 0.2s, color 0.2s, transform 0.15s;
+    }
+    .q-btn-outline:hover {
+      border-color: rgba(92,110,245,0.5);
+      color: var(--qtext) !important;
+      transform: translateY(-1px);
+    }
+
+    .q-stats {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 2rem;
+      animation: qFadeUp 0.6s 0.4s ease both;
+    }
+    .q-stat { display: flex; flex-direction: column; gap: 0.15rem; }
+    .q-stat-value {
+      font-family: 'DM Mono', monospace;
+      font-size: 1.35rem;
+      font-weight: 500;
+      color: var(--qtext);
+      letter-spacing: -0.02em;
+    }
+    .q-stat-label {
+      font-size: 0.68rem;
+      font-weight: 300;
+      color: var(--qtext-dim);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .q-stat-divider {
+      width: 1px; height: 32px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    /* Right col */
+    .q-hero-right {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      animation: qFadeIn 0.8s 0.5s ease both;
+    }
+    .q-code {
+      background: rgba(13,18,37,0.92);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 0 60px rgba(92,110,245,0.08), 0 24px 48px rgba(0,0,0,0.5);
+    }
+    .q-code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,12,24,0.6);
+    }
+    .q-code-dots { display: flex; gap: 5px; }
+    .q-code-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .q-code-dot:nth-child(1) { background: #ff5f57; }
+    .q-code-dot:nth-child(2) { background: #febc2e; }
+    .q-code-dot:nth-child(3) { background: #28c840; }
+    .q-code-filename {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.68rem;
+      color: var(--qtext-dim);
+      letter-spacing: 0.04em;
+    }
+    .q-code-body {
+      padding: 1.1rem 1.25rem;
+      font-family: monospace;
+      font-size: 0.77rem;
+      line-height: 1.85;
+    }
+    .q-cl { display: block; }
+    .q-cl.i { padding-left: 1.25rem; }
+    .t-cm { color: rgba(232,234,246,0.3); }
+    .t-kw { color: #c792ea; }
+    .t-fn { color: var(--cyan); }
+    .t-st { color: #c3e88d; }
+    .t-va { color: #82aaff; }
+    .t-op { color: var(--qtext-dim); }
+    .t-pl { color: var(--qtext); }
+
+    .q-adapters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+    }
+    .q-adapter-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.63rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--qtext-dim);
+      border: 1px solid var(--border);
+      padding: 0.3rem 0.65rem;
+      border-right: none;
+      white-space: nowrap;
+      cursor: default;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .q-adapter-tag:first-child { border-radius: 3px 0 0 3px; }
+    .q-adapter-tag:last-child { border-right: 1px solid var(--border); border-radius: 0 3px 3px 0; }
+    .q-adapter-tag:hover { color: var(--cyan); border-color: rgba(61,232,200,0.3); }
+
+    /* ── Mobile ── */
+    @media (max-width: 768px) {
+      .q-nav { padding: 1rem 1.25rem; }
+      .q-nav-links { display: none; }
+
+      .q-hero {
+        grid-template-columns: 1fr;
+        min-height: auto;
+        padding: 2.5rem 1.25rem 3rem;
+        gap: 2.5rem;
+      }
+      .q-hero-right { order: -1; }
+      .q-stats { gap: 1.25rem; }
+      .q-stat-divider { display: none; }
+    }
+
+    /* ── Page content area ── */
+    .q-page-content {
+      background: #0a0f1e;
+      position: relative;
+      z-index: 10;
+      border-top: 1px solid var(--border);
+    }
+    .q-page-content .md-content {
+      max-width: 860px !important;
+      margin: 0 auto !important;
+      padding: 4rem 2.5rem 5rem !important;
+      color: var(--qtext) !important;
+    }
+    .q-page-content .md-typeset h1,
+    .q-page-content .md-typeset h2,
+    .q-page-content .md-typeset h3 {
+      color: var(--qtext) !important;
+      font-family: 'Syne', sans-serif !important;
+      font-weight: 700 !important;
+      letter-spacing: -0.02em !important;
+    }
+    .q-page-content .md-typeset h1 { font-size: 2rem !important; margin: 0 0 1.5rem !important; }
+    .q-page-content .md-typeset h2 { font-size: 1.3rem !important; margin: 2.5rem 0 1rem !important; border-bottom: 1px solid var(--border) !important; padding-bottom: 0.5rem !important; }
+    .q-page-content .md-typeset h3 { font-size: 1.05rem !important; margin: 1.75rem 0 0.75rem !important; }
+    .q-page-content .md-typeset p,
+    .q-page-content .md-typeset li {
+      color: var(--qtext-dim) !important;
+      font-size: 0.95rem !important;
+      line-height: 1.8 !important;
+    }
+    .q-page-content .md-typeset strong { color: var(--qtext) !important; }
+    .q-page-content .md-typeset a { color: var(--indigo) !important; text-decoration: none !important; }
+    .q-page-content .md-typeset a:hover { color: var(--cyan) !important; text-decoration: underline !important; }
+    .q-page-content .md-typeset code {
+      background: rgba(92,110,245,0.1) !important;
+      color: var(--cyan) !important;
+      border-radius: 3px !important;
+      padding: 0.1em 0.4em !important;
+      font-size: 0.85em !important;
+    }
+    .q-page-content .md-typeset pre {
+      background: #0d1225 !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 6px !important;
+    }
+    .q-page-content .md-typeset pre code {
+      background: transparent !important;
+      color: var(--qtext) !important;
+      padding: 0 !important;
+    }
+    .q-page-content .md-typeset ul li::marker { color: var(--indigo) !important; }
+    .q-page-content .md-typeset hr {
+      border-color: var(--border) !important;
+      margin: 2.5rem 0 !important;
+    }
+    .q-page-content .md-typeset table {
+      border-collapse: collapse !important;
+      width: 100% !important;
+    }
+    .q-page-content .md-typeset table th {
+      background: rgba(92,110,245,0.08) !important;
+      color: var(--qtext) !important;
+      font-size: 0.78rem !important;
+      letter-spacing: 0.04em !important;
+      text-transform: uppercase !important;
+      border: 1px solid var(--border) !important;
+      padding: 0.6rem 1rem !important;
+    }
+    .q-page-content .md-typeset table td {
+      border: 1px solid var(--border) !important;
+      padding: 0.6rem 1rem !important;
+      color: var(--qtext-dim) !important;
+      font-size: 0.9rem !important;
+    }
+
+    @keyframes qFadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes qFadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes qPulse {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.7); }
+    }
+  </style>
+
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="stylesheets/home.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+                
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden>
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="Quiver" class="md-nav__button md-logo" aria-label="Quiver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Quiver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Olamyy/quiver" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Olamyy/quiver
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting-started/introduction/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/feature-views/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feature Views
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/temporal-queries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Queries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/fanout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fanout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="guides/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="guides/kubernetes-sidecar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes Sidecar
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="guides/multi-backend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-Backend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reference/python-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+                
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" hidden>
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+<div class="quiver-page">
+  <div class="q-blob q-blob-1"></div>
+  <div class="q-blob q-blob-2"></div>
+  <canvas id="bg-canvas"></canvas>
+  <div class="q-grid-overlay"></div>
+
+  <!-- Custom nav replaces Material header -->
+  <nav class="q-nav">
+    <a href="." class="q-nav-logo">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+        <path d="M4 14L14 4L24 14" stroke="#5c6ef5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 20L14 10L24 20" stroke="#3de8c8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+        <path d="M4 26L14 16L24 26" stroke="#5c6ef5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/>
+      </svg>
+      <span class="q-nav-logo-text">Quiver</span>
+    </a>
+  </nav>
+
+  <section class="q-hero">
+    <div class="q-hero-left">
+      <div class="q-eyebrow">Arrow Flight · gRPC · Columnar Transport</div>
+
+      <h1 class="q-headline">
+        <em>Low latency</em>, feature serving for ML inference.
+      </h1>
+
+      <p class="q-sub">
+        Fetch features from multiple backends in a single call. Quiver handles fan-out, merging, and returns columnar data with Apache Arrow Flight.
+      </p>
+
+      <div class="q-buttons">
+        <a href="getting-started/installation/" class="q-btn-primary">
+          Get started
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </a>
+        <a href="getting-started/quickstart/" class="q-btn-outline">
+          Quickstart
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+        </a>
+      </div>
+
+      <div class="q-stats">
+        <div class="q-stat">
+          <span class="q-stat-value">&lt;1ms</span>
+          <span class="q-stat-label">overhead per request</span>
+        </div>
+        <div class="q-stat-divider"></div>
+        <div class="q-stat">
+          <span class="q-stat-value">Zero-copy</span>
+          <span class="q-stat-label">arrow delivery to clients</span>
+        </div>
+        <div class="q-stat-divider"></div>
+        <div class="q-stat">
+          <span class="q-stat-value">5+</span>
+          <span class="q-stat-label">Backend supported</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="q-hero-right">
+      <div class="q-code">
+        <div class="q-code-header">
+          <div class="q-code-dots">
+            <div class="q-code-dot"></div>
+            <div class="q-code-dot"></div>
+            <div class="q-code-dot"></div>
+          </div>
+          <span class="q-code-filename">inference.py</span>
+          <span style="width:48px"></span>
+        </div>
+        <div class="q-code-body">
+<span class="q-cl"><span class="t-kw">from</span> <span class="t-va">quiver</span> <span class="t-kw">import</span> <span class="t-pl">Client</span></span>
+<span class="q-cl">&nbsp;</span>
+<span class="q-cl"><span class="t-va">client</span> <span class="t-op">=</span> <span class="t-fn">Client</span><span class="t-pl">(</span><span class="t-st">"localhost:8815"</span><span class="t-pl">)</span></span>
+<span class="q-cl">&nbsp;</span>
+<span class="q-cl"><span class="t-va">table</span> <span class="t-op">=</span> <span class="t-va">client</span><span class="t-op">.</span><span class="t-fn">get_features</span><span class="t-pl">(</span></span>
+<span class="q-cl i"><span class="t-va">feature_view</span><span class="t-op">=</span><span class="t-st">"user_features"</span><span class="t-pl">,</span></span>
+<span class="q-cl i"><span class="t-va">entities</span><span class="t-op">=</span><span class="t-pl">[</span><span class="t-st">"user:1000"</span><span class="t-pl">,</span> <span class="t-st">"user:1001"</span><span class="t-pl">],</span></span>
+<span class="q-cl i"><span class="t-va">features</span><span class="t-op">=</span><span class="t-pl">[</span><span class="t-st">"score"</span><span class="t-pl">,</span> <span class="t-st">"country"</span><span class="t-pl">],</span></span>
+<span class="q-cl"><span class="t-pl">)</span></span>
+<span class="q-cl">&nbsp;</span>
+<span class="q-cl"><span class="t-cm"># zero-copy Arrow → tensor</span></span>
+<span class="q-cl"><span class="t-va">tensor</span> <span class="t-op">=</span> <span class="t-va">table</span><span class="t-op">.</span><span class="t-fn">to_torch</span><span class="t-pl">()</span></span>
+        </div>
+      </div>
+
+      <div class="q-adapters">
+        <span class="q-adapter-tag">Redis</span>
+        <span class="q-adapter-tag">PostgreSQL</span>
+        <span class="q-adapter-tag">S3 / Parquet</span>
+        <span class="q-adapter-tag">ClickHouse</span>
+        <span class="q-adapter-tag">Memory</span>
+        <span class="q-adapter-tag">DuckDB</span>
+        <span class="q-adapter-tag">and many more ...</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  const COLORS = ['rgba(92,110,245,','rgba(61,232,200,','rgba(130,150,255,'];
+  function mkStream() {
+    return {
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vx: (Math.random() * 1.5 + 0.5) * (Math.random() < 0.5 ? 1 : -1),
+      vy: Math.random() * 0.4 - 0.2,
+      len: Math.random() * 80 + 40,
+      alpha: Math.random() * 0.25 + 0.05,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      width: Math.random() * 1.2 + 0.3,
+      hs: Math.random() * 4 + 2,
+    };
+  }
+  const S = Array.from({length: 55}, mkStream);
+  function draw(s) {
+    const a = Math.atan2(s.vy, s.vx);
+    const tx = s.x - Math.cos(a)*s.len, ty = s.y - Math.sin(a)*s.len;
+    const g = ctx.createLinearGradient(tx,ty,s.x,s.y);
+    g.addColorStop(0, s.color+'0)');
+    g.addColorStop(1, s.color+s.alpha+')');
+    ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(s.x,s.y);
+    ctx.strokeStyle=g; ctx.lineWidth=s.width; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(s.x,s.y);
+    ctx.lineTo(s.x-s.hs*Math.cos(a-0.4), s.y-s.hs*Math.sin(a-0.4));
+    ctx.lineTo(s.x-s.hs*Math.cos(a+0.4), s.y-s.hs*Math.sin(a+0.4));
+    ctx.closePath(); ctx.fillStyle=s.color+s.alpha+')'; ctx.fill();
+  }
+  function tick() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(const s of S) {
+      draw(s); s.x+=s.vx; s.y+=s.vy;
+      if(s.x>canvas.width+s.len) s.x=-s.len;
+      if(s.x<-s.len) s.x=canvas.width+s.len;
+      if(s.y>canvas.height+10) s.y=-10;
+      if(s.y<-10) s.y=canvas.height+10;
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+})();
+</script>
+
+
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.indexes", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

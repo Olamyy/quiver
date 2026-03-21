@@ -1,0 +1,2177 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Arrow-native feature serving for ML inference">
+      
+      
+      
+        <link rel="canonical" href="https://olamyy.github.io/quiver/concepts/architecture/">
+      
+      
+        <link rel="prev" href="../../getting-started/installation/">
+      
+      
+        <link rel="next" href="../configuration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Architecture - Quiver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/home.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Quiver" class="md-header__button md-logo" aria-label="Quiver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Quiver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Olamyy/quiver" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Olamyy/quiver
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Quiver" class="md-nav__button md-logo" aria-label="Quiver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Quiver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Olamyy/quiver" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Olamyy/quiver
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/introduction/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-level diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-transport-arrow-flight" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Transport (Arrow Flight)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 1: Transport (Arrow Flight)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-arrow-flight-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Arrow Flight is
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rpc-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RPC surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-transport-layer-handles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the transport layer handles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Resolution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 2: Resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-resolve-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The resolve() function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#feature-partitioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Feature partitioning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arrow-type-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Arrow type system
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporal-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-request-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The request cache
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3-backend-adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: Backend Adapters
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 3: Backend Adapters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-trait-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The trait contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ordering-hints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ordering hints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adapter-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#source-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timeout-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timeout handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-4-configuration-and-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 4: Configuration and Registry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 4: Configuration and Registry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-staticregistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The StaticRegistry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#featureresolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FeatureResolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow: end to end
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fanout-and-the-arrow-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fanout and the Arrow merge
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#latency-characteristics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Latency characteristics
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-views/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feature Views
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../temporal-queries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Queries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fanout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fanout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/kubernetes-sidecar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes Sidecar
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/multi-backend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-Backend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/python-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-level diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-transport-arrow-flight" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Transport (Arrow Flight)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 1: Transport (Arrow Flight)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-arrow-flight-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Arrow Flight is
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rpc-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RPC surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-transport-layer-handles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the transport layer handles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Resolution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 2: Resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-resolve-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The resolve() function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#feature-partitioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Feature partitioning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arrow-type-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Arrow type system
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporal-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-request-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The request cache
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3-backend-adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: Backend Adapters
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 3: Backend Adapters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-trait-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The trait contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ordering-hints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ordering hints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adapter-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#source-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timeout-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timeout handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-4-configuration-and-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 4: Configuration and Registry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 4: Configuration and Registry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-staticregistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The StaticRegistry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#featureresolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FeatureResolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow: end to end
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fanout-and-the-arrow-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fanout and the Arrow merge
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#latency-characteristics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Latency characteristics
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
+<p>Quiver is a feature serving system, not a feature store. It does not compute, transform, or materialize features. It serves features that already exist in your backends by routing requests to the right adapters, dispatching them in parallel, and returning the results as a single entity-aligned columnar batch.</p>
+<p>This page explains each architectural layer in depth: what it does, why it exists, and how it interacts with the rest of the system.</p>
+<hr />
+<h2 id="high-level-diagram">High-level diagram<a class="headerlink" href="#high-level-diagram" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Client (model server)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    │  Arrow Flight  do_get(FeatureRequest)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    ▼
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>QuiverFlightServer                              port 8815
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── StaticRegistry       maps feature names → backend + Arrow type
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── Resolver             groups features by adapter, dispatches, merges
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    ├── RequestCache         TTL cache (default) or SWR — configurable per deployment
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    └── FanoutMerger         parallel async dispatch → Arrow LEFT JOIN
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>            ├── RedisAdapter
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>            ├── PostgresAdapter
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>            ├── S3ParquetAdapter
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>            ├── ClickHouseAdapter
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>            └── MemoryAdapter
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                    │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>                    ▼
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>            RecordBatch   (columnar, entity-aligned, one row per entity)
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>Observability server                            port 8816
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    └── MetricsStore         per-request latency breakdowns (registry, dispatch, merge, serialize)
+</code></pre></div>
+<hr />
+<h2 id="layer-1-transport-arrow-flight">Layer 1: Transport (Arrow Flight)<a class="headerlink" href="#layer-1-transport-arrow-flight" title="Permanent link">&para;</a></h2>
+<p><code>QuiverFlightServer</code> implements the <a href="https://arrow.apache.org/docs/format/Flight.html">Apache Arrow Flight</a> <code>FlightService</code> gRPC interface. It handles everything related to network I/O and serialization, and contains no business logic.</p>
+<h3 id="what-arrow-flight-is">What Arrow Flight is<a class="headerlink" href="#what-arrow-flight-is" title="Permanent link">&para;</a></h3>
+<p>Arrow Flight is a gRPC-based protocol for high-throughput columnar data transfer. Unlike a standard gRPC service that serializes data to/from protobuf row-by-row, Flight transmits Arrow <code>RecordBatch</code> objects directly over the wire.</p>
+<p>For backends that already store data in Arrow format (S3/Parquet, ClickHouse), this is zero-copy end-to-end. There is no deserialization to rows and no re-serialization to columns. For JSON-backed stores like Redis and PostgreSQL, Quiver constructs an Arrow <code>RecordBatch</code> from the fetched row data before encoding it for Flight. The columnar construction happens once in the adapter. No reshaping occurs at the model server. The zero-copy guarantee applies from Quiver's cache layer outward regardless of backend format. Warm cache hits are always zero-copy.</p>
+<h3 id="rpc-surface">RPC surface<a class="headerlink" href="#rpc-surface" title="Permanent link">&para;</a></h3>
+<p>Quiver exposes three Arrow Flight RPCs:</p>
+<table>
+<thead>
+<tr>
+<th>RPC</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>do_get(Ticket)</code></td>
+<td>Primary feature retrieval endpoint. Accepts a <code>FeatureRequest</code> serialized into the <code>Ticket</code> bytes, returns a <code>FlightData</code> stream.</td>
+</tr>
+<tr>
+<td><code>get_schema(FlightDescriptor)</code></td>
+<td>Returns the Arrow schema for a feature view without fetching data. Useful for schema discovery at startup.</td>
+</tr>
+<tr>
+<td><code>list_flights(Criteria)</code></td>
+<td>Lists available feature views.</td>
+</tr>
+</tbody>
+</table>
+<p><code>do_get</code> is the only endpoint used in the hot path. The others are used for tooling and introspection.</p>
+<h3 id="what-the-transport-layer-handles">What the transport layer handles<a class="headerlink" href="#what-the-transport-layer-handles" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Deserializes the <code>FeatureRequest</code> protobuf from the <code>Ticket</code> bytes in the incoming <code>do_get</code> call</li>
+<li>Validates the <code>as_of</code> timestamp if present. Invalid timestamps return <code>Status::invalid_argument</code> rather than silently falling back to <code>now()</code></li>
+<li>Generates a UUID <code>request_id</code>, returned in the <code>x-quiver-request-id</code> gRPC response header</li>
+<li>Delegates to <code>Resolver.resolve()</code> to produce a <code>RecordBatch</code></li>
+<li>Encodes the <code>RecordBatch</code> into a <code>FlightData</code> stream using <code>FlightDataEncoderBuilder</code></li>
+<li>Sets the <code>x-quiver-from-cache</code> header when the result was served from the request cache</li>
+<li>Records per-request latency metrics to the shared <code>MetricsStore</code></li>
+<li>Logs access events (request_id, feature_view, entity count, latency)</li>
+</ul>
+<h3 id="what-it-does-not-handle">What it does not handle<a class="headerlink" href="#what-it-does-not-handle" title="Permanent link">&para;</a></h3>
+<p>The transport layer does not know which adapters exist, what feature views are registered, or how to query any backend. All of that is delegated to the resolver.</p>
+<hr />
+<h2 id="layer-2-resolution">Layer 2: Resolution<a class="headerlink" href="#layer-2-resolution" title="Permanent link">&para;</a></h2>
+<p>The <code>Resolver</code> is the core of Quiver. It orchestrates the entire serving path: registry lookup, backend routing, type enforcement, parallel dispatch, and result merging.</p>
+<h3 id="the-resolve-function">The resolve() function<a class="headerlink" href="#the-resolve-function" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>resolve(feature_view, entity_ids, feature_names, as_of)
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    → (RecordBatch, FanoutLatencies)
+</code></pre></div>
+<p>A single call to <code>resolve()</code> does everything needed to go from a logical feature request to a columnar result:</p>
+<ol>
+<li><strong>Registry lookup.</strong> Fetch the <code>FeatureView</code> definition for the requested <code>feature_view</code> name.</li>
+<li><strong>Feature filtering.</strong> Validate that every requested feature name exists in the view.</li>
+<li><strong>Partition.</strong> Group feature columns by their <code>source</code> adapter (e.g., <code>{redis: ["last_active"], postgres: ["score", "country"]}</code>).</li>
+<li><strong>Type enforcement.</strong> Parse Arrow type strings from config; enforce UTC timezone on timestamp columns.</li>
+<li><strong>Resolution map.</strong> Construct a <code>FeatureResolution</code> per feature: expected Arrow type + source path (table name, key template, etc.).</li>
+<li><strong>Cache check.</strong> Return immediately on a hit (TTL mode) or serve stale and schedule async refresh (SWR mode); proceed to dispatch on a miss.</li>
+<li><strong>Parallel dispatch.</strong> Fire all adapter calls concurrently using <code>tokio::join_all</code>.</li>
+<li><strong>Arrow merge.</strong> LEFT JOIN all sparse <code>RecordBatch</code> results on <code>entity_id</code>.</li>
+<li><strong>Validation.</strong> Verify output row count and schema match the request.</li>
+<li><strong>Metrics.</strong> Record per-stage latencies and return them alongside the <code>RecordBatch</code>.</li>
+</ol>
+<h3 id="feature-partitioning">Feature partitioning<a class="headerlink" href="#feature-partitioning" title="Permanent link">&para;</a></h3>
+<p>When a feature view has columns from multiple backends, the resolver splits the column list by <code>source</code>. For example, a view with <code>score</code> and <code>country</code> from <code>postgres</code> and <code>last_active</code> from <code>redis</code> produces two dispatch groups:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>postgres → [score, country]   with FeatureResolution{type: float64, source_path: table:user_features}
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>redis    → [last_active]      with FeatureResolution{type: utf8, source_path: &quot;user:{entity}:last_active&quot;}
+</code></pre></div>
+<p>Each group is dispatched independently and in parallel.</p>
+<h3 id="arrow-type-system">Arrow type system<a class="headerlink" href="#arrow-type-system" title="Permanent link">&para;</a></h3>
+<p>Column types are declared in YAML config as strings (<code>"float64"</code>, <code>"utf8"</code>, <code>"timestamp[ns, UTC]"</code>). The resolver parses these into <code>DataType</code> values using <code>parse_arrow_type_string()</code> and passes them to each adapter as part of the <code>FeatureResolution</code>. Adapters use the expected type when constructing the output <code>RecordBatch</code> schema, ensuring schema consistency across calls.</p>
+<p>Unrecognised type strings produce an error at startup. They are never silently coerced to a fallback type. Timestamp columns are always given a UTC timezone (<code>Timestamp(Nanosecond, Some("UTC"))</code>), enforced unconditionally at the resolver level to prevent timezone ambiguity propagating into model inputs.</p>
+<h3 id="temporal-routing">Temporal routing<a class="headerlink" href="#temporal-routing" title="Permanent link">&para;</a></h3>
+<p>When a request includes an <code>as_of</code> timestamp, the resolver applies clock-skew-aware routing. Backends that support point-in-time queries (PostgreSQL, ClickHouse) receive the <code>as_of</code> value directly. Redis returns current values only.</p>
+<p>The default clock-skew margin is 30 seconds. Requests with <code>as_of</code> within 30 seconds of now are treated as current-time requests to avoid unnecessary latency penalties from temporal query paths.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The redis adapter <strong>currently</strong> does not support temporal queries. This means that any feature columns sourced from Redis will return current values even if <code>as_of</code> is in the past. 
+For <code>as_of</code> queries requiring historical accuracy, use backends that support time travel natively (PostgreSQL, ClickHouse, S3/Parquet).</p>
+</div>
+<h3 id="the-request-cache">The request cache<a class="headerlink" href="#the-request-cache" title="Permanent link">&para;</a></h3>
+<p>Before dispatching to adapters, the resolver checks the in-process cache keyed by <code>(feature_view, entity_ids, feature_names)</code>. A cache hit returns immediately without any backend calls.</p>
+<p>Quiver supports two cache modes, configurable per deployment:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Default</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ttl</code></td>
+<td>Yes</td>
+<td>Entries expire after a fixed TTL. On expiry, the next request blocks until the backend responds and repopulates the cache.</td>
+</tr>
+<tr>
+<td><code>swr</code></td>
+<td>No</td>
+<td>Entries have a TTL but are served stale after expiry while a background refresh runs. The requesting client never blocks waiting for a refresh.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">server</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">cache</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ttl</span><span class="w">          </span><span class="c1"># &quot;ttl&quot; (default) or &quot;swr&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">ttl_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
+</code></pre></div>
+<p><strong>TTL mode</strong> is the default because its consistency behaviour is straightforward. Once an entry expires, all subsequent requests see fresh data. Use this when stale feature values are unacceptable (e.g., fraud signals, real-time pricing).</p>
+<p><strong>SWR mode</strong> is better suited to traffic patterns with high entity repetition (e.g., fraud detection pipelines where the same user generates many events in a short window). Stale requests return immediately and the refresh happens asynchronously behind them, keeping tail latency low at the cost of serving briefly stale data. The staleness window is bounded by the TTL.</p>
+<hr />
+<h2 id="layer-3-backend-adapters">Layer 3: Backend Adapters<a class="headerlink" href="#layer-3-backend-adapters" title="Permanent link">&para;</a></h2>
+<p>Each adapter implements the <code>BackendAdapter</code> trait, which defines a uniform interface for all backend types.</p>
+<h3 id="the-trait-contract">The trait contract<a class="headerlink" href="#the-trait-contract" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">get_with_resolutions</span><span class="p">(</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="n">entity_ids</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="p">[</span><span class="nb">String</span><span class="p">],</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="n">resolutions</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">HashMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">FeatureResolution</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="n">entity_key</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="n">as_of</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">DateTime</span><span class="o">&lt;</span><span class="n">Utc</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="n">timeout</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Duration</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">RecordBatch</span><span class="p">,</span><span class="w"> </span><span class="n">AdapterError</span><span class="o">&gt;</span>
+</code></pre></div>
+<p>All adapters must satisfy two invariants:</p>
+<ol>
+<li><strong>Row ordering.</strong> The output <code>RecordBatch</code> must have exactly one row per entity in <code>entity_ids</code>, in the same order. The merge step depends on this invariant.</li>
+<li><strong>Null-filling.</strong> Missing entities must produce a null row, not an absent row. Dropping rows would silently break the LEFT JOIN merge.</li>
+</ol>
+<p>If an adapter returns rows in an arbitrary order (e.g., PostgreSQL), it must re-sort before returning.</p>
+<h3 id="ordering-hints">Ordering hints<a class="headerlink" href="#ordering-hints" title="Permanent link">&para;</a></h3>
+<p>Adapters declare their ordering behaviour via a <code>capabilities()</code> method:</p>
+<table>
+<thead>
+<tr>
+<th>Hint</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OrderedByRequest</code></td>
+<td>Rows are guaranteed to match the <code>entity_ids</code> input order. No re-sort needed.</td>
+</tr>
+<tr>
+<td><code>Unordered</code></td>
+<td>Quiver will re-sort the output using a lookup map.</td>
+</tr>
+</tbody>
+</table>
+<p>Redis and Memory adapters are <code>OrderedByRequest</code> because they build results by iterating <code>entity_ids</code> directly. PostgreSQL and ClickHouse are <code>Unordered</code> because query result order depends on the execution plan.</p>
+<h3 id="adapter-reference">Adapter reference<a class="headerlink" href="#adapter-reference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Adapter</th>
+<th>Backend</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RedisAdapter</code></td>
+<td>Redis</td>
+<td>Real-time key-value features via <code>HSET</code>; key templates (<code>user:{entity}:score</code>); current values only, no <code>as_of</code> support</td>
+</tr>
+<tr>
+<td><code>PostgresAdapter</code></td>
+<td>PostgreSQL</td>
+<td>Historical batch features; point-in-time queries via <code>valid_from &lt;= as_of</code></td>
+</tr>
+<tr>
+<td><code>S3ParquetAdapter</code></td>
+<td>S3 + Parquet</td>
+<td>Data lake features; zero-copy Arrow IPC; predicate pushdown for entity filtering</td>
+</tr>
+<tr>
+<td><code>ClickHouseAdapter</code></td>
+<td>ClickHouse</td>
+<td>Analytical features; columnar native transport; complex aggregations</td>
+</tr>
+<tr>
+<td><code>MemoryAdapter</code></td>
+<td>In-process</td>
+<td>Testing and local development only; no external services required</td>
+</tr>
+</tbody>
+</table>
+<h3 id="source-paths">Source paths<a class="headerlink" href="#source-paths" title="Permanent link">&para;</a></h3>
+<p>Each adapter interprets the <code>source_path</code> field differently:</p>
+<p><strong>Redis</strong> — a key template with <code>{entity}</code> interpolated per entity:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">source_path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;user:{entity}:last_active&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># entity &quot;1000&quot; → Redis key &quot;user:1000:last_active&quot;</span>
+</code></pre></div></p>
+<p><strong>PostgreSQL and ClickHouse</strong> — a structured table reference:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">source_path</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">user_features</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># SELECT &lt;columns&gt; FROM user_features WHERE user_id IN (...)</span>
+</code></pre></div></p>
+<p><strong>S3/Parquet</strong> — a bucket and prefix:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">source_path</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">bucket</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-feature-bucket</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">prefix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">features/user/</span>
+</code></pre></div></p>
+<h3 id="timeout-handling">Timeout handling<a class="headerlink" href="#timeout-handling" title="Permanent link">&para;</a></h3>
+<p>Every adapter call has a configurable timeout. If no timeout is specified in the request, adapters apply a per-backend default (typically 5 seconds for network-backed stores). Adapters that time out return <code>AdapterError::Timeout</code>, which the resolver converts to a fully null <code>RecordBatch</code> for that backend's columns rather than failing the entire request.</p>
+<p>This behaviour is controlled by the <code>fanout.downtime_strategy</code> config field:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>null_on_timeout</code> (default)</td>
+<td>Timed-out backend columns are null-filled; request succeeds</td>
+</tr>
+<tr>
+<td><code>fail_fast</code></td>
+<td>Any backend timeout fails the entire request with an error</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="layer-4-configuration-and-registry">Layer 4: Configuration and Registry<a class="headerlink" href="#layer-4-configuration-and-registry" title="Permanent link">&para;</a></h2>
+<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
+<p>Quiver is fully driven by a YAML config file. There is no dynamic config API, no admin UI, and no database-backed configuration. The entire serving topology (which feature views exist, which backends serve which columns, connection strings, timeout policies) is declared in a single file.</p>
+<p>This is intentional. Configuration-as-code means feature views are version-controlled, diffable, and deployable alongside application code. Changing which backend serves a feature is a one-line YAML change with a diff.</p>
+<p>The config is parsed at startup by <code>config.rs</code> using <code>serde</code>. Environment variables can override any field, which is the standard mechanism for injecting credentials in Kubernetes deployments.</p>
+<h3 id="the-staticregistry">The StaticRegistry<a class="headerlink" href="#the-staticregistry" title="Permanent link">&para;</a></h3>
+<p><code>StaticRegistry</code> is the in-process registry that maps feature view names to their definitions. It is populated once at startup from the <code>registry.views</code> section of the config and is read-only for the lifetime of the server.</p>
+<p>For each feature view, the registry stores:</p>
+<ul>
+<li>The entity type and entity key column name</li>
+<li>The list of column definitions: name, Arrow type, nullable flag, source adapter, source path override</li>
+<li>The backend routing table: which columns map to which adapters</li>
+</ul>
+<p>The registry has no persistence layer. On restart, it repopulates from config. This is appropriate for Quiver's use case. Feature view schemas are stable, change infrequently, and are defined by operators rather than runtime events.</p>
+<h3 id="featureresolution">FeatureResolution<a class="headerlink" href="#featureresolution" title="Permanent link">&para;</a></h3>
+<p>The <code>FeatureResolution</code> struct is the unit of information passed from the resolver to each adapter for a single feature column:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">FeatureResolution</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="sd">/// The Arrow DataType this column should be cast to in the output RecordBatch.</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">expected_type</span><span class="p">:</span><span class="w"> </span><span class="nc">DataType</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="sd">/// The physical location of this feature in the backend (table name, key template, etc.).</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">source_path</span><span class="p">:</span><span class="w"> </span><span class="nc">SourcePath</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="p">}</span>
+</code></pre></div>
+<p>By passing type and source path together, adapters have everything they need to build a correctly-typed <code>RecordBatch</code> without knowing anything about the feature view schema. This is the boundary that keeps adapters backend-specific and schema-agnostic.</p>
+<hr />
+<h2 id="data-flow-end-to-end">Data flow: end to end<a class="headerlink" href="#data-flow-end-to-end" title="Permanent link">&para;</a></h2>
+<p>This is the complete path a feature request takes through the system:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>1.  Client sends:  do_get(Ticket{feature_view, entity_ids, feature_names, as_of})
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>2.  Transport:     deserialize FeatureRequest from Ticket bytes
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>3.  Transport:     validate as_of timestamp (error on invalid, not silent fallback)
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>4.  Transport:     generate request_id UUID
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>5.  Resolver:      registry.get_view(feature_view)         → FeatureView
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>6.  Resolver:      validate feature_names ⊆ view.columns
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>7.  Resolver:      check request cache
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>                     → hit (TTL mode): return immediately (steps 8–13 skipped)
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>                     → hit (SWR mode, stale): return stale, schedule async refresh
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>                     → miss: continue
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>8.  Resolver:      partition columns by source adapter
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>9.  Resolver:      build FeatureResolution map (type + source_path per column)
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>10. Resolver:      tokio::join_all([
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>                     redis_adapter.get_with_resolutions(...),
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>                     postgres_adapter.get_with_resolutions(...),
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>                   ])
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>                   → [RecordBatch, RecordBatch]  (sparse, one per backend)
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>11. Resolver:      Arrow LEFT JOIN on entity_id             → single RecordBatch
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>12. Resolver:      validate: row_count == entity_ids.len(), schema correct
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>13. Resolver:      record FanoutLatencies (per-stage timings)
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>14. Transport:     encode RecordBatch → FlightData stream
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>15. Transport:     set x-quiver-request-id, x-quiver-from-cache headers
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>16. Transport:     store FanoutLatencies in MetricsStore keyed by request_id
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>17. Client:        receives RecordBatch as pyarrow.Table
+</code></pre></div>
+<hr />
+<h2 id="fanout-and-the-arrow-merge">Fanout and the Arrow merge<a class="headerlink" href="#fanout-and-the-arrow-merge" title="Permanent link">&para;</a></h2>
+<p>When a request spans multiple backends, the resolver dispatches all adapters concurrently. Each adapter returns a sparse <code>RecordBatch</code> — only the rows for entities it found data for. The merge step assembles these sparse batches into a single output batch that:</p>
+<ul>
+<li>Contains exactly one row per requested entity, in the same order as the input list</li>
+<li>Null-fills any entity not found in a given backend</li>
+<li>Uses Arrow's native join primitives to avoid row-level data movement</li>
+</ul>
+<p>See <a href="../fanout/">Fanout</a> for the complete 4-phase merge algorithm, partial failure handling, and <code>downtime_strategy</code> configuration.</p>
+<hr />
+<h2 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h2>
+<p>A second gRPC server runs on port <code>8816</code>. Every feature request generates a UUID that is returned in the <code>x-quiver-request-id</code> response header. Pass that UUID to the observability server to retrieve a per-stage latency breakdown:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>What it measures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>registry_ms</code></td>
+<td>Time to look up the feature view in the registry</td>
+</tr>
+<tr>
+<td><code>partition_ms</code></td>
+<td>Time to group features by backend</td>
+</tr>
+<tr>
+<td><code>dispatch_ms</code></td>
+<td>Wall-clock time for the parallel backend dispatch (equals the slowest adapter)</td>
+</tr>
+<tr>
+<td><code>adapter_ms[name]</code></td>
+<td>Per-adapter latency (recorded concurrently)</td>
+</tr>
+<tr>
+<td><code>merge_ms</code></td>
+<td>Time for the Arrow LEFT JOIN merge</td>
+</tr>
+<tr>
+<td><code>validate_ms</code></td>
+<td>Time for schema and row-count validation</td>
+</tr>
+<tr>
+<td><code>serialize_ms</code></td>
+<td>Time to encode the RecordBatch into FlightData</td>
+</tr>
+<tr>
+<td><code>total_ms</code></td>
+<td>End-to-end request latency from resolver entry to FlightData stream</td>
+</tr>
+</tbody>
+</table>
+<p>Metrics are stored in an in-process LRU cache (<code>MetricsStore</code>) with a 1-hour TTL. There is no external metrics store. For long-term retention, instrument the observability RPC and export to your existing monitoring system (Prometheus, Datadog, etc.).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In the sidecar deployment model, each pod has its own <code>MetricsStore</code>. A <code>request_id</code> is only resolvable against the observability endpoint of the pod that served it. Passing a <code>request_id</code> to a different pod returns nothing.</p>
+</div>
+<p>See the <a href="../../reference/python-client/">Python Client</a> reference for how to retrieve and parse these metrics.</p>
+<hr />
+<h2 id="deployment-model">Deployment model<a class="headerlink" href="#deployment-model" title="Permanent link">&para;</a></h2>
+<p>Quiver is designed as a <strong>sidecar</strong>: one instance per model server pod, not a shared central service. This means:</p>
+<ul>
+<li><strong>No added network hop.</strong> The model server calls Quiver over the pod's loopback interface (<code>localhost:8815</code>). Quiver then calls the backends, which are the same systems the model server would have called directly.</li>
+<li><strong>No single point of failure.</strong> If a Quiver instance crashes, only its pod is affected. There is no shared serving infrastructure to take down.</li>
+<li><strong>Per-model configuration.</strong> Different model servers can run different Quiver configurations: different feature views, different backends, different cache TTLs, different fanout strategies.</li>
+</ul>
+<p>See <a href="../../guides/kubernetes-sidecar/">Kubernetes Sidecar</a> for the deployment guide, including container spec examples and liveness probes.</p>
+<hr />
+<h2 id="latency-characteristics">Latency characteristics<a class="headerlink" href="#latency-characteristics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Request type</th>
+<th>Source</th>
+<th>Typical latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Warm cache hit</td>
+<td>In-process request cache</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>Cold miss, Arrow-native backend</td>
+<td>S3/Parquet, ClickHouse</td>
+<td>2–15ms</td>
+</tr>
+<tr>
+<td>Cold miss, JSON backend</td>
+<td>Redis, PostgreSQL</td>
+<td>5–20ms + backend RTT</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The &lt;1ms warm cache figure applies to any cache hit (TTL or SWR mode). The resolver returns a cached <code>RecordBatch</code> without any adapter calls. Cold miss latency includes backend RTT, adapter serialization, and the Arrow merge. For Arrow-native backends, the merge step is zero-copy; for JSON backends, it includes a deserialization step inside the adapter.</p>
+<p>Quiver's stated target is &lt;10ms P99 on cold requests against network-backed stores. For use cases requiring sub-millisecond cold latency, in-process feature computation is the correct answer. The loopback network call adds ~50–100µs that cannot be eliminated by any sidecar architecture.</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../getting-started/installation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Installation">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Installation
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Configuration">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Configuration
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.indexes", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
