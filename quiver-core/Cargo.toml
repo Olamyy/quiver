@@ -39,7 +39,7 @@ lru = "0.16"
 clickhouse = { version = "0.14", features = ["rustls-tls-webpki-roots"] }
 regex = "1.10"
 moka = { version = "0.12", features = ["future"] }
-uuid = { version = "1.6", features = ["v4", "serde"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio"] }
