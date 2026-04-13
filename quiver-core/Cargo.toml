@@ -36,7 +36,7 @@ aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-credential-types = "1.1"
 tokio-stream = "0.1"
 lru = "0.16"
-clickhouse = { version = "0.14", features = ["rustls-tls-webpki-roots"] }
+clickhouse = { version = "0.15", features = ["rustls-tls-webpki-roots"] }
 regex = "1.10"
 moka = { version = "0.12", features = ["future"] }
 uuid = { version = "1.23", features = ["v4", "serde"] }
