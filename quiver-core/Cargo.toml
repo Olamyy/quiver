@@ -10,7 +10,7 @@ tonic = { version = "0.14", features = ["gzip", "tls-ring", "zstd"] }
 tonic-prost = "0.14"
 prost = "0.14"
 prost-types = "0.14"
-tokio = { version = "1.37", features = ["full"] }
+tokio = { version = "1.51", features = ["full"] }
 futures = "0.3"
 bytes = "1.6"
 dashmap = "6"
