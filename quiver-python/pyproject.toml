@@ -19,7 +19,7 @@ numpy = ["numpy>=1.21.0"]
 torch = [
     "torch>=1.12.0",
 ]
-tensorflow = ["tensorflow>=2.9.0"]
+tensorflow = ["tensorflow>=2.21.0"]
 polars = ["polars>=0.18.0"]
 
 [dependency-groups]
