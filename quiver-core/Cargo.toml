@@ -35,7 +35,7 @@ object_store = { version = "0.13", features = ["aws"] }
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-credential-types = "1.1"
 tokio-stream = "0.1"
-lru = "0.16"
+lru = "0.17"
 clickhouse = { version = "0.14", features = ["rustls-tls-webpki-roots"] }
 regex = "1.10"
 moka = { version = "0.12", features = ["future"] }
